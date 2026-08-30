@@ -256,11 +256,24 @@ fun CameraInfo.supportsVideoFps60(): Boolean {
     return supported
 }
 
+@OptIn(ExperimentalCamera2Interop::class)
 private fun CameraInfo.probeVideoFps60(): Boolean {
-    val preview = Preview.Builder().build()
-    val video = VideoCapture.withOutput(Recorder.Builder().build())
-    val session = androidx.camera.core.SessionConfig.Builder(preview, video)
-        .setRequiredFeatureGroup(androidx.camera.core.featuregroup.GroupableFeature.FPS_60)
-        .build()
-    return runCatching { isSessionConfigSupported(session) }.getOrDefault(false)
+    val supportedRanges = runCatching {
+        Camera2CameraInfo.from(this).getCameraCharacteristic(
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+        )
+    }.getOrNull()
+    val has60Fps = supportedRanges?.any { it.upper >= 60 } ?: false
+    if (!has60Fps) return false
+
+    return try {
+        val preview = Preview.Builder().build()
+        val video = VideoCapture.withOutput(Recorder.Builder().build())
+        val session = androidx.camera.core.SessionConfig.Builder(preview, video)
+            .setRequiredFeatureGroup(androidx.camera.core.featuregroup.GroupableFeature.FPS_60)
+            .build()
+        isSessionConfigSupported(session)
+    } catch (e: Throwable) {
+        false
+    }
 }

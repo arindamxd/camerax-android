@@ -103,7 +103,7 @@ enum class CaptureAspect(val prefValue: String) {
 
     companion object {
         fun fromPref(value: String?): CaptureAspect =
-            entries.firstOrNull { it.prefValue == value } ?: FULL
+            entries.firstOrNull { it.prefValue == value } ?: RATIO_4_3
     }
 }
 
@@ -181,7 +181,7 @@ data class CameraBindConfig(
     val effect: EffectMode,
     val liveEffects: Boolean = false,
     val cameraId: String? = null,
-    val captureAspect: CaptureAspect = CaptureAspect.FULL,
+    val captureAspect: CaptureAspect = CaptureAspect.RATIO_4_3,
     val videoQuality: VideoQuality = VideoQuality.FHD,
     val videoHdrRange: VideoHdrRange = VideoHdrRange.SDR,
     val slowMotion: Boolean = false,
@@ -271,7 +271,7 @@ data class ZoomInfo(
 
 /** Domain: recording lifecycle events from [CameraRepository.recordingEvents]. */
 sealed interface RecordingEvent {
-    data class Status(val durationNanos: Long) : RecordingEvent
+    data class Status(val durationNanos: Long, val sizeBytes: Long = 0L) : RecordingEvent
     data object Paused : RecordingEvent
     data object Resumed : RecordingEvent
     data class Finalized(val success: Boolean) : RecordingEvent
@@ -288,7 +288,7 @@ data class SlowMotionOptions(
 /** Settings that rebind or change capture behavior. Loaded from app preferences. */
 data class CaptureSettings(
     val confirmEnabled: Boolean = false,
-    val aspect: CaptureAspect = CaptureAspect.FULL,
+    val aspect: CaptureAspect = CaptureAspect.RATIO_4_3,
     val videoQuality: VideoQuality = VideoQuality.FHD,
     val videoHdrRange: VideoHdrRange = VideoHdrRange.SDR,
     val videoStabilization: Boolean = true,

@@ -8,6 +8,8 @@ import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.view.OrientationEventListener
+import android.view.Surface
 import android.widget.Toast
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -155,6 +157,24 @@ fun CameraScreen(
         }
         displayManager?.registerDisplayListener(listener, Handler(Looper.getMainLooper()))
         onDispose { displayManager?.unregisterDisplayListener(listener) }
+    }
+    DisposableEffect(context) {
+        val orientationEventListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
+                val rotation = when (orientation) {
+                    in 45..134 -> Surface.ROTATION_270
+                    in 135..224 -> Surface.ROTATION_180
+                    in 225..314 -> Surface.ROTATION_90
+                    else -> Surface.ROTATION_0
+                }
+                viewModel.updateTargetRotation(rotation)
+            }
+        }
+        if (orientationEventListener.canDetectOrientation()) {
+            orientationEventListener.enable()
+        }
+        onDispose { orientationEventListener.disable() }
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -343,6 +363,7 @@ fun CameraScreen(
                     onShutterChanged = viewModel::setShutterNanos,
                     onCompensationChanged = viewModel::setExposureCompensation
                 )
+                PanoramaLivePreview(state)
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         LiveStatusStrip(state)
