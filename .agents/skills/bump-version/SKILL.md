@@ -18,7 +18,7 @@ Same workflow as [`.cursor/rules/bump-version.mdc`](../../../.cursor/rules/bump-
 Same `versionName` (another Play upload of `X.Y.Z`):
 
 1. In root [`build.gradle.kts`](../../../build.gradle.kts), increment `ext["versionCodeOffset"]` by 1.
-2. `versionCode` = `major * 10000 + minor * 100 + patch + offset` (example: 1.7.0 + offset 4 → **10704**).
+2. `versionCode` = `major * 10000 + minor * 100 + patch + offset` (example: 1.7.0 + offset 5 → **10705**).
 3. Update [`RELEASE.md`](../../../RELEASE.md) **Current shipping target** and Play Console **Version** lines. Do not rewrite “Last local verification” as if those checks already ran on the new code.
 
 Only bump `versionMajor` / `versionMinor` / `versionPatch` (and reset offset to 0) if the user explicitly asks for a new `X.Y.Z`.
