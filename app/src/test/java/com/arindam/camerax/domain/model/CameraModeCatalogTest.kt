@@ -67,9 +67,9 @@ class CameraModeCatalogTest {
     }
 
     @Test
-    fun captureAspect_fromPrefDefaultsToFull() {
-        assertEquals(CaptureAspect.FULL, CaptureAspect.fromPref(null))
-        assertEquals(CaptureAspect.RATIO_4_3, CaptureAspect.fromPref("4_3"))
+    fun captureAspect_fromPrefDefaultsToRatio43() {
+        assertEquals(CaptureAspect.RATIO_4_3, CaptureAspect.fromPref(null))
+        assertEquals(CaptureAspect.FULL, CaptureAspect.fromPref("full"))
     }
 
     @Test

@@ -112,7 +112,7 @@ fun settingsSections(
                 titleRes = R.string.pref_title_capture_aspect,
                 subtitleRes = R.string.pref_subtitle_capture_aspect,
                 icon = Icons.Outlined.Crop,
-                defaultValue = CaptureAspect.FULL.prefValue,
+                defaultValue = CaptureAspect.RATIO_4_3.prefValue,
                 options = listOf(
                     SettingsChoice(R.string.pref_aspect_4_3, CaptureAspect.RATIO_4_3.prefValue),
                     SettingsChoice(R.string.pref_aspect_16_9, CaptureAspect.RATIO_16_9.prefValue),

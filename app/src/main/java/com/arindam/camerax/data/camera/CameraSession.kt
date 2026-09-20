@@ -90,6 +90,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -156,10 +158,15 @@ class CameraSession(private val context: Context) : CameraRepository {
     private var lastBoundExtension = CameraExtension.NONE
     private var lastRawFullSensor = false
 
+    private val initMutex = Mutex()
+
     suspend fun initialize() {
         if (cameraProvider != null) return
-        cameraProvider = awaitProvider()
-        extensionsManager = awaitExtensions(cameraProvider!!)
+        initMutex.withLock {
+            if (cameraProvider != null) return  // double-check after acquiring lock
+            cameraProvider = awaitProvider()
+            extensionsManager = awaitExtensions(cameraProvider!!)
+        }
     }
 
     fun supportedExtensions(selector: CameraSelector): Set<CameraExtension> {
@@ -248,7 +255,21 @@ class CameraSession(private val context: Context) : CameraRepository {
         }
 
         val previewBuilder = Preview.Builder().setTargetRotation(rotation)
-        config.captureAspect.toResolutionSelector()?.let { previewBuilder.setResolutionSelector(it) }
+        previewBuilder.setResolutionSelector(config.captureAspect.toResolutionSelector())
+        Camera2Interop.Extender(previewBuilder).apply {
+            setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            )
+            setCaptureRequestOption(
+                CaptureRequest.EDGE_MODE,
+                CaptureRequest.EDGE_MODE_HIGH_QUALITY
+            )
+            setCaptureRequestOption(
+                CaptureRequest.NOISE_REDUCTION_MODE,
+                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+            )
+        }
         val cameraInfo = stillInfo
         val wantStab = config.videoStabilization && !useExtension
         val previewStab = wantStab && isPreviewStabilizationSupported(cameraInfo)
@@ -283,7 +304,7 @@ class CameraSession(private val context: Context) : CameraRepository {
                     .build()
             )
         } else {
-            config.captureAspect.toResolutionSelector()?.let { captureBuilder.setResolutionSelector(it) }
+            captureBuilder.setResolutionSelector(config.captureAspect.toResolutionSelector())
         }
         val resolved = resolveStillOutput(
             info = runCatching { provider.getCameraInfo(selector) }.getOrNull()
@@ -315,16 +336,34 @@ class CameraSession(private val context: Context) : CameraRepository {
         }
         val wantFps60 = config.videoFps60 && includeVideo && !useExtension
 
-        camera = bindWithFallback(
-            provider = provider,
-            lifecycleOwner = lifecycleOwner,
-            selector = selector,
-            preview = preview,
-            imageCapture = capture,
-            videoCapture = if (includeVideo) video else null,
-            imageAnalysis = analysis,
-            fps60 = wantFps60
-        )
+        camera = try {
+            bindWithFallback(
+                provider = provider,
+                lifecycleOwner = lifecycleOwner,
+                selector = selector,
+                preview = preview,
+                imageCapture = capture,
+                videoCapture = if (includeVideo) video else null,
+                imageAnalysis = analysis,
+                fps60 = wantFps60
+            )
+        } catch (error: Exception) {
+            if (!config.cameraId.isNullOrBlank()) {
+                Logger.warning(TAG, "Bind with camera ${config.cameraId} failed: ${error.message}; falling back to default lens")
+                bindWithFallback(
+                    provider = provider,
+                    lifecycleOwner = lifecycleOwner,
+                    selector = config.lens.toSelector(),
+                    preview = preview,
+                    imageCapture = capture,
+                    videoCapture = if (includeVideo) video else null,
+                    imageAnalysis = analysis,
+                    fps60 = wantFps60
+                )
+            } else {
+                throw error
+            }
+        }
         if (!includeVideo) videoCapture = null
 
         return finishBind(
@@ -385,7 +424,11 @@ class CameraSession(private val context: Context) : CameraRepository {
         )
         recording?.stop()
         val videoFile = createFile(outputDirectory, Constants.FILE.VIDEO_EXTENSION)
-        val output = FileOutputOptions.Builder(videoFile).build()
+        val availableBytes = android.os.StatFs(outputDirectory.absolutePath).availableBytes
+        val sizeLimit = (availableBytes - STORAGE_RESERVE_BYTES).coerceAtLeast(MIN_RECORDING_BYTES)
+        val output = FileOutputOptions.Builder(videoFile)
+            .setFileSizeLimit(sizeLimit)
+            .build()
         val pending = persistentPending(
             capture.output.prepareRecording(context, output),
             persist = persistent
@@ -567,6 +610,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         val provider = cameraProvider ?: return emptyList()
         val infos = provider.availableCameraInfos.filter { it.lensFacing == facing }
         if (infos.size < 2) return emptyList()
+
         val labeled = infos.mapNotNull { info ->
             val camera2 = Camera2CameraInfo.from(info)
             val focals = camera2.getCameraCharacteristic(
@@ -724,6 +768,11 @@ class CameraSession(private val context: Context) : CameraRepository {
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
+        if (imageCapture == null) {
+            // No stills available; skip recording to avoid orphaned video.
+            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            return
+        }
         motionStill = null
         motionOnSaved = onSaved
         motionOnError = onError
@@ -755,6 +804,8 @@ class CameraSession(private val context: Context) : CameraRepository {
                 finishMotionIfReady()
             },
             onError = { message ->
+                stopRecording()
+                motionVideo?.delete()
                 clearMotionCapture()
                 onError(message)
             }
@@ -891,6 +942,7 @@ class CameraSession(private val context: Context) : CameraRepository {
     private fun stopColorAnalysis() {
         imageAnalysis?.clearAnalyzer()
         imageAnalysis = null
+        colorAnalyzer?.release()
         colorAnalyzer = null
         _effectFrame.value = null
     }
@@ -918,7 +970,14 @@ class CameraSession(private val context: Context) : CameraRepository {
         val selector = selectorFor(config)
         provider.unbindAll()
         camera = try {
-            provider.bindToLifecycle(lifecycleOwner, selector, previewUseCase, video)
+            val group = UseCaseGroup.Builder()
+                .addUseCase(previewUseCase)
+                .addUseCase(video)
+                .also { builder ->
+                    previewView.viewPort?.let { builder.setViewPort(it) }
+                }
+                .build()
+            provider.bindToLifecycle(lifecycleOwner, selector, group)
         } catch (error: Exception) {
             Logger.warning(TAG, "Flip while recording failed: ${error.message}")
             throw error
@@ -984,6 +1043,10 @@ class CameraSession(private val context: Context) : CameraRepository {
         useCases: List<UseCase>,
         fps60: Boolean
     ): Camera {
+        val groupBuilder = UseCaseGroup.Builder().apply {
+            useCases.forEach { addUseCase(it) }
+            boundPreviewView?.viewPort?.let { setViewPort(it) }
+        }
         if (fps60) {
             try {
                 val builder = SessionConfig.Builder(*useCases.toTypedArray())
@@ -996,7 +1059,7 @@ class CameraSession(private val context: Context) : CameraRepository {
             }
         }
         fps60Active = false
-        return provider.bindToLifecycle(lifecycleOwner, selector, *useCases.toTypedArray())
+        return provider.bindToLifecycle(lifecycleOwner, selector, groupBuilder.build())
     }
 
     private fun bindConcurrent(
@@ -1396,5 +1459,9 @@ class CameraSession(private val context: Context) : CameraRepository {
         private const val MOTION_DURATION_MS = 1_500L
         /** Cap decoded still edge length when applying color effects. */
         private const val MAX_STILL_EDGE = 8192
+        /** Reserve 100 MB of free space when setting recording file size limits. */
+        private const val STORAGE_RESERVE_BYTES = 100L * 1024 * 1024
+        /** Minimum recording size limit (10 MB) even when storage is critically low. */
+        private const val MIN_RECORDING_BYTES = 10L * 1024 * 1024
     }
 }

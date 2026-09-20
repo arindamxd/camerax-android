@@ -35,7 +35,7 @@ class PreferenceSettingsRepositoryTest {
             settings
         )
         assertFalse(settings.confirmEnabled)
-        assertEquals(CaptureAspect.FULL, settings.aspect)
+        assertEquals(CaptureAspect.RATIO_4_3, settings.aspect)
         assertEquals(VideoQuality.FHD, settings.videoQuality)
         assertEquals(VideoHdrRange.SDR, settings.videoHdrRange)
         assertTrue(settings.videoStabilization)
@@ -49,7 +49,7 @@ class PreferenceSettingsRepositoryTest {
         val context = RuntimeEnvironment.getApplication()
         PreferenceManager.getDefaultSharedPreferences(context).edit()
             .putBoolean(context.getString(R.string.pref_key_capture_confirm), true)
-            .putString(context.getString(R.string.pref_key_capture_aspect), CaptureAspect.RATIO_4_3.prefValue)
+            .putString(context.getString(R.string.pref_key_capture_aspect), CaptureAspect.FULL.prefValue)
             .putString(context.getString(R.string.pref_key_video_quality), VideoQuality.UHD.prefValue)
             .putString(context.getString(R.string.pref_key_video_hdr), VideoHdrRange.HLG10.prefValue)
             .putBoolean(context.getString(R.string.pref_key_gallery_video_autoplay), true)
@@ -59,7 +59,7 @@ class PreferenceSettingsRepositoryTest {
         val settings = repository().loadCaptureSettings()
 
         assertTrue(settings.confirmEnabled)
-        assertEquals(CaptureAspect.RATIO_4_3, settings.aspect)
+        assertEquals(CaptureAspect.FULL, settings.aspect)
         assertEquals(VideoQuality.UHD, settings.videoQuality)
         assertEquals(VideoHdrRange.HLG10, settings.videoHdrRange)
         assertTrue(settings.galleryVideoAutoplay)

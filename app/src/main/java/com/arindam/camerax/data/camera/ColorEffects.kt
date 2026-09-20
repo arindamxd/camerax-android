@@ -54,6 +54,24 @@ object ColorEffects {
         return output
     }
 
+    /**
+     * Draws [source] with [type] color matrix onto a pre-allocated [target] bitmap using
+     * [canvas]. Avoids per-frame allocation for live Effects mode. Caller must ensure
+     * [target] dimensions match the source after orientation.
+     */
+    fun renderInto(
+        source: Bitmap,
+        type: EffectMode,
+        target: Bitmap,
+        canvas: Canvas,
+        paint: Paint
+    ) {
+        val software = source.toSoftwareArgb()
+        paint.colorFilter = androidMatrix(type)?.let { ColorMatrixColorFilter(it) }
+        canvas.drawBitmap(software, 0f, 0f, paint)
+        if (software !== source) software.recycle()
+    }
+
     fun applyToBitmap(source: Bitmap, type: EffectMode): Bitmap {
         if (type == EffectMode.NONE) return source
         return render(source, type)

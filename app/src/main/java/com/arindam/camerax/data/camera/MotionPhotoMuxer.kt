@@ -2,22 +2,40 @@ package com.arindam.camerax.data.camera
 
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 
 /**
  * Data: muxes a still JPEG and an MP4 clip into an Android Motion Photo v1 file
  * (JPEG primary + XMP + appended video). Call via [com.arindam.camerax.domain.usecase.CapturePhoto]
  * / [CameraSession] — not from Compose or click handlers (runs on the IO dispatcher).
+ *
+ * The JPEG is streamed through rather than loaded fully into memory, so large still files
+ * (high-res, RAW companion JPEGs) do not cause heap pressure.
  */
 object MotionPhotoMuxer {
 
     fun mux(stillJpeg: File, videoMp4: File, output: File): File {
-        val jpeg = stillJpeg.readBytes()
-        val video = videoMp4.readBytes()
-        require(jpeg.size >= 4 && jpeg[0] == 0xFF.toByte() && jpeg[1] == 0xD8.toByte()) {
-            "Still image is not a JPEG"
+        val videoLength = videoMp4.length().toInt()
+        val xmpSegment = buildXmpSegment(videoLength)
+        val insertOffset = findXmpInsertOffset(stillJpeg)
+
+        output.outputStream().buffered().use { outStream ->
+            stillJpeg.inputStream().buffered().use { inStream ->
+                // Copy JPEG bytes before the XMP insertion point.
+                copyExact(inStream, outStream, insertOffset)
+
+                // Write the XMP APP1 segment.
+                outStream.write(xmpSegment)
+
+                // Copy the rest of the JPEG.
+                inStream.copyTo(outStream)
+            }
+            // Append the video.
+            videoMp4.inputStream().buffered().use { inStream ->
+                inStream.copyTo(outStream)
+            }
         }
-        val xmp = xmpPacket(video.size)
-        output.writeBytes(insertXmp(jpeg, xmp) + video)
         return output
     }
 
@@ -110,39 +128,82 @@ object MotionPhotoMuxer {
         }
     }
 
-    private fun insertXmp(jpeg: ByteArray, xmpXml: String): ByteArray {
-        val payload = ByteArrayOutputStream().apply {
-            write("http://ns.adobe.com/xap/1.0/".toByteArray())
-            write(0)
-            write(xmpXml.toByteArray())
-        }.toByteArray()
-        val segment = ByteArray(4 + payload.size)
-        segment[0] = 0xFF.toByte()
-        segment[1] = 0xE1.toByte()
-        val length = payload.size + 2
-        segment[2] = (length shr 8).toByte()
-        segment[3] = (length and 0xFF).toByte()
-        System.arraycopy(payload, 0, segment, 4, payload.size)
-        val insertAt = xmpInsertOffset(jpeg)
-        return jpeg.copyOfRange(0, insertAt) + segment + jpeg.copyOfRange(insertAt, jpeg.size)
+    /**
+     * Scans the JPEG file to find the byte offset where the XMP APP1 segment should be
+     * inserted, without loading the entire file into memory.
+     */
+    private fun findXmpInsertOffset(file: File): Long {
+        file.inputStream().buffered().use { input ->
+            if (input.read() != 0xFF || input.read() != 0xD8) return 2L
+            var offset = 2L
+            while (true) {
+                val b1 = input.read()
+                if (b1 < 0) return offset
+                if (b1 != 0xFF) {
+                    offset++
+                    continue
+                }
+                val marker = input.read()
+                if (marker < 0) return offset
+                // SOS or EOI: insert before here.
+                if (marker == 0xDA || marker == 0xD9) return offset
+                // Standalone markers (RST, TEM).
+                if (marker == 0x01 || marker in 0xD0..0xD7) {
+                    offset += 2
+                    continue
+                }
+                val lengthHi = input.read()
+                val lengthLo = input.read()
+                if (lengthHi < 0 || lengthLo < 0) return offset
+                val segmentLength = ((lengthHi shl 8) or lengthLo)
+                // APP0 (JFIF) and APP1 (Exif/XMP): skip past and insert after.
+                if (marker != 0xE0 && marker != 0xE1) return offset
+                val payload = segmentLength - 2
+                if (payload > 0) {
+                    var remaining = payload.toLong()
+                    while (remaining > 0) {
+                        val skipped = input.skip(remaining)
+                        if (skipped <= 0) return offset
+                        remaining -= skipped
+                    }
+                }
+                offset += 2 + segmentLength
+            }
+        }
     }
 
-    private fun xmpInsertOffset(jpeg: ByteArray): Int {
-        var index = 2
-        while (index + 4 < jpeg.size && jpeg[index] == 0xFF.toByte()) {
-            val marker = jpeg[index + 1].toInt() and 0xFF
-            if (marker == 0xDA || marker == 0xD9) return index
-            if (marker == 0x01 || marker in 0xD0..0xD7) {
-                index += 2
-                continue
-            }
-            val segmentLength =
-                ((jpeg[index + 2].toInt() and 0xFF) shl 8) or (jpeg[index + 3].toInt() and 0xFF)
-            val next = index + 2 + segmentLength
-            if (marker != 0xE0 && marker != 0xE1) return index
-            index = next
+    /**
+     * Copies exactly [count] bytes from [input] to [output]. Throws if the input
+     * is exhausted before [count] bytes are read.
+     */
+    private fun copyExact(input: InputStream, output: OutputStream, count: Long) {
+        val buffer = ByteArray(8192)
+        var remaining = count
+        while (remaining > 0) {
+            val toRead = minOf(remaining, buffer.size.toLong()).toInt()
+            val read = input.read(buffer, 0, toRead)
+            if (read <= 0) throw IllegalStateException("Unexpected end of JPEG at offset ${count - remaining}")
+            output.write(buffer, 0, read)
+            remaining -= read
         }
-        return index
+    }
+
+    /**
+     * Builds the raw APP1 segment bytes: [FF E1] [length] [XMP namespace\0] [XMP XML].
+     */
+    private fun buildXmpSegment(videoLength: Int): ByteArray {
+        val xmpXml = xmpPacket(videoLength).toByteArray()
+        val namespace = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray()
+        val payloadSize = namespace.size + xmpXml.size
+        val segmentLength = payloadSize + 2
+        val segment = ByteArray(4 + payloadSize)
+        segment[0] = 0xFF.toByte()
+        segment[1] = 0xE1.toByte()
+        segment[2] = (segmentLength shr 8).toByte()
+        segment[3] = (segmentLength and 0xFF).toByte()
+        System.arraycopy(namespace, 0, segment, 4, namespace.size)
+        System.arraycopy(xmpXml, 0, segment, 4 + namespace.size, xmpXml.size)
+        return segment
     }
 
     private fun xmpPacket(videoLength: Int): String = """

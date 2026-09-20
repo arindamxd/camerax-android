@@ -12,8 +12,10 @@ import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.DynamicRange
 import androidx.camera.core.ImageCapture
+import android.util.Size
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.extensions.ExtensionMode
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.Quality
@@ -59,13 +61,16 @@ fun CameraExtension.toExtensionMode(): Int = when (this) {
     CameraExtension.BEAUTY -> ExtensionMode.FACE_RETOUCH
 }
 
-fun CaptureAspect.toResolutionSelector(): ResolutionSelector? = when (this) {
-    CaptureAspect.FULL -> null
+fun CaptureAspect.toResolutionSelector(): ResolutionSelector = when (this) {
+    CaptureAspect.FULL, CaptureAspect.RATIO_16_9 -> ResolutionSelector.Builder()
+        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
+        .build()
     CaptureAspect.RATIO_4_3 -> ResolutionSelector.Builder()
         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-        .build()
-    CaptureAspect.RATIO_16_9 -> ResolutionSelector.Builder()
-        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
         .build()
 }
 
@@ -177,7 +182,10 @@ fun resolveStillOutput(
 }
 
 fun VideoRecordEvent.toDomain(): RecordingEvent? = when (this) {
-    is VideoRecordEvent.Status -> RecordingEvent.Status(recordingStats.recordedDurationNanos)
+    is VideoRecordEvent.Status -> RecordingEvent.Status(
+        durationNanos = recordingStats.recordedDurationNanos,
+        sizeBytes = recordingStats.numBytesRecorded
+    )
     is VideoRecordEvent.Pause -> RecordingEvent.Paused
     is VideoRecordEvent.Resume -> RecordingEvent.Resumed
     is VideoRecordEvent.Finalize -> RecordingEvent.Finalized(success = !hasError())
