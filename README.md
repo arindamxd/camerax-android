@@ -104,7 +104,7 @@ Copy-paste path for another app: start at [`CameraRepository`](app/src/main/java
 
 ## Stack
 
-- Kotlin **2.4.10**, Jetpack Compose, CameraX **1.6.1**
+- Kotlin **2.4.10**, Jetpack Compose, CameraX **1.6.2**
 - minSdk **23**, target/compileSdk **37**
 - Navigation, ViewModel, Coil
 - Optional Firebase / Crashlytics when `app/google-services.json` is present (Analytics collection stays off in the manifest)

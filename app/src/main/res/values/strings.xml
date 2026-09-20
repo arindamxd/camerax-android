@@ -187,7 +187,7 @@
 
     <!-- Tools: Camera engine -->
     <string name="engine_library">Library</string>
-    <string name="engine_camerax_version">CameraX 1.6.1</string>
+    <string name="engine_camerax_version">CameraX 1.6.2</string>
     <string name="engine_preview_impl">PreviewView COMPATIBLE · TextureView</string>
     <string name="engine_cameras_heading">Cameras</string>
     <string name="engine_cameras_empty">No cameras reported</string>
