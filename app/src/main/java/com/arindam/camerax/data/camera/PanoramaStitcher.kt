@@ -99,6 +99,7 @@ object PanoramaStitcher {
 
         val maxYShift = (left.height * 0.05f).roundToInt()
         val dyStep = max(1, maxYShift / 5)
+        var useBulk = true
 
         var overlap = minOverlap
         while (overlap <= maxOverlap) {
@@ -110,18 +111,35 @@ object PanoramaStitcher {
                 val maxY = min(left.height, left.height + dy)
                 
                 while (y < maxY) {
-                    // Bulk-read the overlap region from both bitmaps.
-                    left.getPixels(leftRow, 0, overlap, left.width - overlap, y, overlap, 1)
-                    right.getPixels(rightRow, 0, overlap, 0, y - dy, overlap, 1)
-                    var x = 0
-                    while (x < overlap) {
-                        val leftPixel = leftRow[x]
-                        val rightPixel = rightRow[x]
-                        error += abs(((leftPixel shr 16) and 0xFF) - ((rightPixel shr 16) and 0xFF))
-                        error += abs(((leftPixel shr 8) and 0xFF) - ((rightPixel shr 8) and 0xFF))
-                        error += abs((leftPixel and 0xFF) - (rightPixel and 0xFF))
-                        samples++
-                        x += 8
+                    if (useBulk) {
+                        try {
+                            left.getPixels(leftRow, 0, overlap, left.width - overlap, y, overlap, 1)
+                            right.getPixels(rightRow, 0, overlap, 0, y - dy, overlap, 1)
+                            var x = 0
+                            while (x < overlap) {
+                                val leftPixel = leftRow[x]
+                                val rightPixel = rightRow[x]
+                                error += abs(((leftPixel shr 16) and 0xFF) - ((rightPixel shr 16) and 0xFF))
+                                error += abs(((leftPixel shr 8) and 0xFF) - ((rightPixel shr 8) and 0xFF))
+                                error += abs((leftPixel and 0xFF) - (rightPixel and 0xFF))
+                                samples++
+                                x += 8
+                            }
+                        } catch (_: Throwable) {
+                            useBulk = false
+                        }
+                    }
+                    if (!useBulk) {
+                        var x = 0
+                        while (x < overlap) {
+                            val leftPixel = left.getPixel(left.width - overlap + x, y)
+                            val rightPixel = right.getPixel(x, y - dy)
+                            error += abs(((leftPixel shr 16) and 0xFF) - ((rightPixel shr 16) and 0xFF))
+                            error += abs(((leftPixel shr 8) and 0xFF) - ((rightPixel shr 8) and 0xFF))
+                            error += abs((leftPixel and 0xFF) - (rightPixel and 0xFF))
+                            samples++
+                            x += 8
+                        }
                     }
                     y += sampleY
                 }
