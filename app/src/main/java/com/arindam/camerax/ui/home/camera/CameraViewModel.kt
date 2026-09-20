@@ -3,6 +3,7 @@ package com.arindam.camerax.ui.home.camera
 import android.animation.ValueAnimator
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
+import android.media.MediaActionSound
 import android.os.Build
 import android.view.animation.PathInterpolator
 import androidx.camera.view.PreviewView
@@ -19,6 +20,7 @@ import com.arindam.camerax.data.camera.PreviewViewHost
 import com.arindam.camerax.di.AppDispatchers
 import com.arindam.camerax.di.CameraInteractors
 import com.arindam.camerax.domain.model.LastCameraSession
+import com.arindam.camerax.data.media.MediaPublishException
 import com.arindam.camerax.data.media.mediaFileInfo
 import com.arindam.camerax.domain.model.CameraBindConfig
 import com.arindam.camerax.domain.model.CameraExtension
@@ -101,6 +103,13 @@ class CameraViewModel(
     private var lastPanoramaYaw: Float? = null
     private var panoramaCaptureBusy = false
     private var modeBeforeTools: CameraMode = CameraMode.PHOTO
+    private val shutterSound: MediaActionSound by lazy {
+        MediaActionSound().apply {
+            load(MediaActionSound.SHUTTER_CLICK)
+            load(MediaActionSound.START_VIDEO_RECORDING)
+            load(MediaActionSound.STOP_VIDEO_RECORDING)
+        }
+    }
 
     init {
         restoreChrome()
@@ -108,6 +117,11 @@ class CameraViewModel(
         persistChrome()
         viewModelScope.launch(dispatchers.io) {
             setOutputDirectory(interactors.picturesDirectory())
+            // Clean stale panorama temp frames from previous sessions (process death).
+            outputDirectory?.let { dir ->
+                val panoTemp = File(dir, PANO_TEMP_DIR)
+                if (panoTemp.exists()) panoTemp.deleteRecursively()
+            }
         }
         viewModelScope.launch {
             val features = withContext(dispatchers.default) {
@@ -188,8 +202,7 @@ class CameraViewModel(
 
     fun bind(
         lifecycleOwner: LifecycleOwner,
-        previewView: PreviewView,
-        pipPreviewView: PreviewView? = null
+        previewView: PreviewView
     ) {
         viewModelScope.launch {
             bindMutex.withLock {
@@ -198,7 +211,7 @@ class CameraViewModel(
                     val state = _uiState.value
                     val profile = state.mode.profile()
                     val result = interactors.bindCamera(
-                        host = PreviewViewHost(lifecycleOwner, previewView, pipPreviewView),
+                        host = PreviewViewHost(lifecycleOwner, previewView),
                         config = CameraBindConfig(
                             lens = state.lens,
                             flash = state.flash,
@@ -295,15 +308,6 @@ class CameraViewModel(
                         _uiState.value.shutterNanos
                     )
                     interactors.setExposureCompensation(_uiState.value.exposureCompensation)
-                    val requestedId = state.cameraId
-                    val boundId = result.boundCameraId
-                    if (requestedId != null && boundId != requestedId) {
-                        val wanted = result.physicalZooms.find { it.cameraId == requestedId }
-                            ?: state.physicalZooms.find { it.cameraId == requestedId }
-                        if (wanted != null && wanted.label <= 0.7f && result.minZoom <= 0.7f) {
-                            applyDigitalZoom(result.minZoom)
-                        }
-                    }
                 } catch (error: Exception) {
                     Logger.error(TAG, "Bind failed: ${error.message}")
                     val state = _uiState.value
@@ -499,19 +503,13 @@ class CameraViewModel(
 
     fun setZoom(ratio: Float) {
         cancelZoomAnimation()
-        val physical = matchingPhysicalCamera(ratio)
-        if (physical != null) {
-            switchPhysicalCamera(physical)
+        val state = _uiState.value
+        val target = ratio.coerceIn(state.minZoom, state.maxZoom)
+        val start = state.zoomRatio
+        if (kotlin.math.abs(start - target) < 0.01f) {
+            applyDigitalZoom(target)
             return
         }
-        val state = _uiState.value
-        val target = if (ratio <= 0.7f) {
-            state.minZoom
-        } else {
-            ratio.coerceIn(state.minZoom, state.maxZoom)
-        }
-        val start = state.zoomRatio
-        if (kotlin.math.abs(start - target) < 0.01f) return
         zoomAnimator = ValueAnimator.ofFloat(start, target).apply {
             duration = 280
             interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
@@ -542,12 +540,16 @@ class CameraViewModel(
         applyDigitalZoom(exp((logAnchor + travel * span).coerceIn(ln(min), ln(max))))
     }
 
-    private fun matchingPhysicalCamera(ratio: Float) = _uiState.value.physicalZooms.minByOrNull {
-        kotlin.math.abs(it.label - ratio)
-    }?.takeIf {
-        kotlin.math.abs(it.label - ratio) < 0.12f &&
-            it.cameraId != _uiState.value.cameraId &&
-            !_uiState.value.isRecording
+    private fun matchingPhysicalCamera(ratio: Float): PhysicalZoom? {
+        val state = _uiState.value
+        if (ratio >= (state.minZoom - 0.05f) && ratio <= (state.maxZoom + 0.05f)) return null
+        return state.physicalZooms.minByOrNull {
+            kotlin.math.abs(it.label - ratio)
+        }?.takeIf {
+            kotlin.math.abs(it.label - ratio) < 0.12f &&
+                it.cameraId != state.cameraId &&
+                !state.isRecording
+        }
     }
 
     private fun switchPhysicalCamera(physical: PhysicalZoom) {
@@ -590,7 +592,6 @@ class CameraViewModel(
             it.copy(
                 extension = extension,
                 autoNightActive = false,
-                mode = CameraMode.EFFECTS,
                 bindRevision = it.bindRevision + 1
             )
         }
@@ -815,6 +816,7 @@ class CameraViewModel(
         countdownJob?.cancel()
         cancelZoomAnimation()
         interactors.releaseCamera()
+        shutterSound.release()
         super.onCleared()
     }
 
@@ -851,6 +853,7 @@ class CameraViewModel(
             )
             result.fold(
                 onSuccess = { file ->
+                    shutterSound.play(MediaActionSound.SHUTTER_CLICK)
                     completeCapture(file, video = false) {
                         copy(
                             captureFlashToken = captureFlashToken + 1,
@@ -888,6 +891,7 @@ class CameraViewModel(
                 _uiState.value.mode.profile().allowsPersistentRecording
         ).fold(
             onSuccess = { file ->
+                shutterSound.play(MediaActionSound.START_VIDEO_RECORDING)
                 pendingVideoFile = file
                 _uiState.update {
                     it.copy(isRecording = true, isPaused = false, recordingNanos = 0L)
@@ -908,12 +912,18 @@ class CameraViewModel(
     private fun handleRecordEvent(event: RecordingEvent) {
         when (event) {
             is RecordingEvent.Status -> {
-                _uiState.update { it.copy(recordingNanos = event.durationNanos) }
+                _uiState.update {
+                    it.copy(
+                        recordingNanos = event.durationNanos,
+                        recordingSizeBytes = event.sizeBytes
+                    )
+                }
             }
 
             RecordingEvent.Paused -> _uiState.update { it.copy(isPaused = true) }
             RecordingEvent.Resumed -> _uiState.update { it.copy(isPaused = false) }
             is RecordingEvent.Finalized -> {
+                shutterSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
                 val file = pendingVideoFile
                 pendingVideoFile = null
                 val discard = discardPendingVideo
@@ -927,6 +937,7 @@ class CameraViewModel(
                             isRecording = false,
                             isPaused = false,
                             recordingNanos = 0L,
+                            recordingSizeBytes = 0L,
                             isMuted = recordMutedByDefault,
                             message = null
                         )
@@ -937,6 +948,7 @@ class CameraViewModel(
                             isRecording = false,
                             isPaused = false,
                             recordingNanos = 0L,
+                            recordingSizeBytes = 0L,
                             isMuted = recordMutedByDefault,
                             message = null
                         )
@@ -947,6 +959,7 @@ class CameraViewModel(
                             isRecording = false,
                             isPaused = false,
                             recordingNanos = 0L,
+                            recordingSizeBytes = 0L,
                             isMuted = recordMutedByDefault,
                             message = if (event.success) null else "Video capture failed"
                         )
@@ -1011,17 +1024,18 @@ class CameraViewModel(
         panoramaFrames.clear()
         lastPanoramaYaw = null
         panoramaCaptureBusy = false
-        _uiState.update { it.copy(panoramaActive = true, panoramaFrames = 0) }
+        _uiState.update { it.copy(panoramaActive = true, panoramaFrames = emptyList()) }
         capturePanoramaFrame(previewView)
     }
 
     private fun capturePanoramaFrame(previewView: PreviewView? = null) {
         val directory = outputDirectory ?: return
+        val panoDir = File(directory, PANO_TEMP_DIR).also { it.mkdirs() }
         if (panoramaCaptureBusy) return
         panoramaCaptureBusy = true
         viewModelScope.launch {
             val result = interactors.capturePhoto(
-                outputDirectory = directory,
+                outputDirectory = panoDir,
                 lens = _uiState.value.lens,
                 effect = _uiState.value.effect,
                 motionPhoto = false
@@ -1032,8 +1046,9 @@ class CameraViewModel(
                     panoramaCaptureBusy = false
                     _uiState.update {
                         it.copy(
-                            panoramaFrames = panoramaFrames.size,
-                            captureFlashToken = it.captureFlashToken + 1
+                            panoramaFrames = panoramaFrames.toList(),
+                            captureFlashToken = it.captureFlashToken + 1,
+                            message = "Panorama step ${panoramaFrames.size}/$PANORAMA_MAX_FRAMES"
                         )
                     }
                     if (panoramaFrames.size >= PANORAMA_MAX_FRAMES) finishPanorama()
@@ -1063,7 +1078,7 @@ class CameraViewModel(
         panoramaFrames.clear()
         lastPanoramaYaw = null
         panoramaCaptureBusy = false
-        _uiState.update { it.copy(panoramaActive = false, panoramaFrames = 0) }
+        _uiState.update { it.copy(panoramaActive = false, panoramaFrames = emptyList()) }
         if (directory == null || frames.isEmpty()) return
         viewModelScope.launch {
             val result = interactors.stitchPanorama(frames, directory)
@@ -1091,7 +1106,7 @@ class CameraViewModel(
         panoramaFrames.clear()
         lastPanoramaYaw = null
         panoramaCaptureBusy = false
-        _uiState.update { it.copy(panoramaActive = false, panoramaFrames = 0) }
+        _uiState.update { it.copy(panoramaActive = false, panoramaFrames = emptyList()) }
         if (frames.isEmpty()) return
         viewModelScope.launch {
             withContext(dispatchers.io) {
@@ -1140,7 +1155,12 @@ class CameraViewModel(
     private fun publishQuietly(file: File) {
         viewModelScope.launch {
             interactors.publishMedia(file).onFailure { error ->
-                Logger.error(TAG, "Publish failed: ${error.message}", error)
+                val expected = error is MediaPublishException && error.expected
+                if (expected) {
+                    Logger.warning(TAG, "Publish failed: ${error.message}", error)
+                } else {
+                    Logger.error(TAG, "Publish failed: ${error.message}", error)
+                }
                 _uiState.update {
                     it.copy(message = error.message ?: "Unable to save to gallery")
                 }
@@ -1186,6 +1206,7 @@ class CameraViewModel(
         private const val STATE_MODE = "camera_mode"
         private const val STATE_LENS = "camera_lens"
         private const val STATE_FLASH = "camera_flash"
+        private const val PANO_TEMP_DIR = "pano_temp"
     }
 
     private fun restoreChrome() {

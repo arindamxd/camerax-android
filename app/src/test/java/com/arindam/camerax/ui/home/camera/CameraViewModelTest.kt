@@ -239,9 +239,9 @@ class CameraViewModelTest {
         val vm = viewModel()
         val before = vm.uiState.value.bindRevision
         vm.applyCaptureSettings(
-            CaptureSettings(aspect = CaptureAspect.RATIO_4_3)
+            CaptureSettings(aspect = CaptureAspect.FULL)
         )
-        assertEquals(CaptureAspect.RATIO_4_3, vm.uiState.value.captureAspect)
+        assertEquals(CaptureAspect.FULL, vm.uiState.value.captureAspect)
         assertEquals(before + 1, vm.uiState.value.bindRevision)
     }
 
@@ -251,12 +251,12 @@ class CameraViewModelTest {
             initial = CameraUiState(
                 mode = CameraMode.PANORAMA,
                 panoramaActive = true,
-                panoramaFrames = 4
+                panoramaFrames = listOf(File("frame1.jpg"), File("frame2.jpg"))
             )
         )
         vm.discardActiveCapture()
         assertFalse(vm.uiState.value.panoramaActive)
-        assertEquals(0, vm.uiState.value.panoramaFrames)
+        assertEquals(emptyList<File>(), vm.uiState.value.panoramaFrames)
         assertTrue(media.published.isEmpty())
     }
 
@@ -266,7 +266,7 @@ class CameraViewModelTest {
             initial = CameraUiState(
                 mode = CameraMode.PANORAMA,
                 panoramaActive = true,
-                panoramaFrames = 0
+                panoramaFrames = emptyList()
             )
         )
         vm.saveActiveCapture()

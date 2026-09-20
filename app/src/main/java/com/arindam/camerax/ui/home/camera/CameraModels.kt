@@ -103,6 +103,7 @@ data class CameraUiState(
     val isMuted: Boolean = false,
     val microphonePermissionGranted: Boolean = true,
     val recordingNanos: Long = 0L,
+    val recordingSizeBytes: Long = 0L,
     val thumbnail: File? = null,
     val extension: CameraExtension = CameraExtension.NONE,
     val supportedExtensions: Set<CameraExtension> = emptySet(),
@@ -118,7 +119,7 @@ data class CameraUiState(
     val motionCapturing: Boolean = false,
     val ultraHdrEnabled: Boolean = false,
     val stillFormat: StillFormat = StillFormat.JPEG,
-    val captureAspect: CaptureAspect = CaptureAspect.FULL,
+    val captureAspect: CaptureAspect = CaptureAspect.RATIO_4_3,
     val videoQuality: VideoQuality = VideoQuality.FHD,
     val videoHdrRange: VideoHdrRange = VideoHdrRange.SDR,
     val videoHdrBound: VideoHdrRange = VideoHdrRange.SDR,
@@ -135,7 +136,7 @@ data class CameraUiState(
     val shutterNanos: Long = 16_666_667L,
     val exposureCompensation: Int = 0,
     val panoramaActive: Boolean = false,
-    val panoramaFrames: Int = 0,
+    val panoramaFrames: List<File> = emptyList(),
     val cameraId: String? = null,
     val physicalZooms: List<PhysicalZoom> = emptyList(),
     val slowMotionSupported: Boolean = false,
@@ -157,32 +158,23 @@ data class CameraUiState(
 ) {
     val zoomChips: List<Float>
         get() {
-            val physical = physicalZooms.map { it.label }
-            if (physical.size >= 2) {
-                return (physical + listOfNotNull(
-                    0.5f.takeIf { minZoom <= 0.7f && physical.none { it <= 0.7f } },
-                    1f.takeIf { 1f !in physical },
-                    2f.takeIf { maxZoom >= 1.9f && 2f !in physical },
-                    5f.takeIf { maxZoom >= 4.5f && 5f !in physical }
-                )).distinct().sorted()
+            val chips = mutableListOf<Float>()
+            // 1. Ultrawide: only include if the hardware actually supports < 0.95x (e.g. 0.6x)
+            if (minZoom < 0.95f) {
+                val roundedMin = (kotlin.math.round(minZoom * 10f) / 10f).coerceAtLeast(0.1f)
+                chips.add(roundedMin)
             }
-            return buildList {
-                if (minZoom <= 0.7f) add(0.5f)
-                add(1f)
-                if (maxZoom >= 1.9f) add(2f)
-                if (maxZoom >= 4.5f) add(5f)
-            }.distinct()
+            // 2. Base 1.0x optical standard is always available
+            chips.add(1.0f)
+            // 3. 2x telephoto/digital step if supported by the hardware maxZoom
+            if (maxZoom >= 1.95f) {
+                chips.add(2.0f)
+            }
+            return chips.distinct().sorted()
         }
 
     val activeZoomChip: Float
-        get() {
-            val bound = cameraId?.let { id ->
-                physicalZooms.firstOrNull { it.cameraId == id }
-            }
-            // Physical cameras report CameraX 1.0 at their native FOV (0.5x / 2x).
-            val equivalent = (bound?.label ?: 1f) * zoomRatio
-            return zoomChips.minByOrNull { kotlin.math.abs(it - equivalent) } ?: equivalent
-        }
+        get() = zoomChips.minByOrNull { kotlin.math.abs(it - zoomRatio) } ?: zoomRatio
 
     val visibleModes: List<CameraMode>
         get() = CameraModeCatalog.visibleModes(slowMotionSupported, concurrentSupported)
@@ -339,4 +331,11 @@ fun formatRecordingTime(nanos: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%02d:%02d".format(minutes, seconds)
+}
+
+fun formatFileSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "%.1f KB".format(bytes / 1024.0)
+    bytes < 1024L * 1024L * 1024L -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+    else -> "%.2f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
 }

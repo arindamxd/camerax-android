@@ -8,6 +8,18 @@ object RobolectricPermissions {
 
     fun applicationContext(): Context = RuntimeEnvironment.getApplication()
 
+    fun grantCamera() {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
+            android.Manifest.permission.CAMERA
+        )
+    }
+
+    fun denyCamera() {
+        shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(
+            android.Manifest.permission.CAMERA
+        )
+    }
+
     fun grantRecordAudio() {
         shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
             android.Manifest.permission.RECORD_AUDIO
@@ -17,6 +29,12 @@ object RobolectricPermissions {
     fun revokeRecordAudio() {
         shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(
             android.Manifest.permission.RECORD_AUDIO
+        )
+    }
+
+    fun denyWriteExternalStorage() {
+        shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(
+            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
         )
     }
 }

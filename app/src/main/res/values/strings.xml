@@ -65,7 +65,7 @@
     <string name="video_hdr_hdr10">HDR10</string>
     <string name="video_hdr_hdr10_plus">HDR10+</string>
     <string name="video_hdr_dolby">Dolby Vision</string>
-    <string name="dual_live_hint">Front + back</string>
+    <string name="dual_live_hint">Front + Back</string>
     <string name="slow_motion_fps">Slo-mo · %1$d fps</string>
     <string name="slow_motion_unsupported">This device doesn\'t support slow motion</string>
     <string name="panorama_hint">Tap shutter, then pan slowly</string>
@@ -161,7 +161,7 @@
     <string name="lab_hybrid_ae_title">Hybrid AE</string>
     <string name="lab_hybrid_ae_body">ISO or shutter priority through Camera2 interop on API 36+</string>
     <string name="lab_concurrent_title">Concurrent cameras</string>
-    <string name="lab_concurrent_body">Front + back Dual preview when the system lists a concurrent pair</string>
+    <string name="lab_concurrent_body">Front + Back Dual PiP video when the system lists a concurrent pair</string>
     <string name="lab_high_speed_title">High-speed slo-mo</string>
     <string name="lab_high_speed_body">Preview + VideoCapture high-speed session at 120 fps or higher</string>
     <string name="lab_fps60_title">60 fps feature group</string>
@@ -187,7 +187,7 @@
 
     <!-- Tools: Camera engine -->
     <string name="engine_library">Library</string>
-    <string name="engine_camerax_version">CameraX 1.6.1</string>
+    <string name="engine_camerax_version">CameraX 1.6.2</string>
     <string name="engine_preview_impl">PreviewView COMPATIBLE · TextureView</string>
     <string name="engine_cameras_heading">Cameras</string>
     <string name="engine_cameras_empty">No cameras reported</string>
@@ -358,7 +358,7 @@
     <string name="pref_title_playstore">PlayStore</string>
     <string name="pref_subtitle_playstore">com.arindam.camerax ↗</string>
     <string name="pref_title_github">GitHub</string>
-    <string name="pref_subtitle_github">android-camerax ↗</string>
+    <string name="pref_subtitle_github">camerax-android ↗</string>
     <string name="pref_title_privacy">Privacy Policy</string>
     <string name="pref_subtitle_privacy">How CameraX uses data ↗</string>
     <string name="pref_title_developer">Developer</string>
@@ -366,7 +366,7 @@
     <string name="pref_title_version">Version</string>
     <string name="pref_subtitle_version">@string/app_version</string>
     <string name="link_playstore" translatable="false">https://play.google.com/store/apps/details?id=com.arindam.camerax</string>
-    <string name="link_repository" translatable="false">https://github.com/arindamxd/android-camerax</string>
+    <string name="link_repository" translatable="false">https://github.com/arindamxd/camerax-android</string>
     <string name="link_developer" translatable="false">https://arindamxd.github.io/</string>
     <string name="link_privacy" translatable="false">https://arindamxd.github.io/projects/camerax/privacy-policy/</string>
 

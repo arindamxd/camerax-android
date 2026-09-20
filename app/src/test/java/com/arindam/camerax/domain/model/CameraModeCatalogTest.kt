@@ -41,6 +41,15 @@ class CameraModeCatalogTest {
     }
 
     @Test
+    fun dualProfile_recordsCompositionVideo() {
+        val profile = CameraModeCatalog.profile(CameraMode.DUAL)
+        assertEquals(CaptureAction.VIDEO, profile.captureAction)
+        assertTrue(profile.showsVideoStatus)
+        assertTrue(profile.bindConcurrent)
+        assertTrue(profile.showsPip)
+    }
+
+    @Test
     fun resolve_fallsBackFromDualToPhoto() {
         val resolved = CameraModeCatalog.resolve(
             mode = CameraMode.DUAL,
@@ -58,9 +67,9 @@ class CameraModeCatalogTest {
     }
 
     @Test
-    fun captureAspect_fromPrefDefaultsToFull() {
-        assertEquals(CaptureAspect.FULL, CaptureAspect.fromPref(null))
-        assertEquals(CaptureAspect.RATIO_4_3, CaptureAspect.fromPref("4_3"))
+    fun captureAspect_fromPrefDefaultsToRatio43() {
+        assertEquals(CaptureAspect.RATIO_4_3, CaptureAspect.fromPref(null))
+        assertEquals(CaptureAspect.FULL, CaptureAspect.fromPref("full"))
     }
 
     @Test
@@ -88,5 +97,35 @@ class CameraModeCatalogTest {
     fun flashMode_nextCycles() {
         assertEquals(FlashMode.ON, FlashMode.OFF.next())
         assertEquals(FlashMode.OFF, FlashMode.TORCH.next())
+    }
+
+    @Test
+    fun effectsProfile_enablesEffectChipsAndStillCapture() {
+        val profile = CameraModeCatalog.profile(CameraMode.EFFECTS)
+        assertEquals(CaptureAction.STILL, profile.captureAction)
+        assertTrue(profile.showsEffects)
+        assertFalse(profile.allowsExtensions)
+        assertTrue(profile.rebindOnEnter)
+    }
+
+    @Test
+    fun panoramaProfile_disablesZoomAndFlash() {
+        val profile = CameraModeCatalog.profile(CameraMode.PANORAMA)
+        assertEquals(CaptureAction.PANORAMA, profile.captureAction)
+        assertFalse(profile.showsFlash)
+        assertFalse(profile.showsZoom)
+        assertFalse(profile.allowsMotionPhoto)
+    }
+
+    @Test
+    fun videoHdrRange_fromPrefDefaultsToSdr() {
+        assertEquals(VideoHdrRange.SDR, VideoHdrRange.fromPref(null))
+        assertEquals(VideoHdrRange.HLG10, VideoHdrRange.fromPref("hlg10"))
+    }
+
+    @Test
+    fun slowMotionRate_fromPrefDefaultsToAuto() {
+        assertEquals(SlowMotionRate.AUTO, SlowMotionRate.fromPref(null))
+        assertEquals(SlowMotionRate.FPS_120, SlowMotionRate.fromPref("120"))
     }
 }

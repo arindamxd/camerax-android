@@ -337,7 +337,12 @@ fun RecordingHud(
                     text = if (state.isPaused) {
                         stringResource(R.string.recording_paused)
                     } else {
-                        formatRecordingTime(state.recordingNanos)
+                        val time = formatRecordingTime(state.recordingNanos)
+                        if (state.recordingSizeBytes > 0L) {
+                            "$time · ${formatFileSize(state.recordingSizeBytes)}"
+                        } else {
+                            time
+                        }
                     },
                     color = CameraOnGlass,
                     fontFamily = CameraMono,
@@ -409,7 +414,7 @@ fun LiveStatusStrip(state: CameraUiState) {
         if (state.captureAction == CaptureAction.PANORAMA) {
             add(
                 if (state.panoramaActive) {
-                    stringResource(R.string.panorama_panning, state.panoramaFrames)
+                    stringResource(R.string.panorama_panning, state.panoramaFrames.size)
                 } else {
                     stringResource(R.string.panorama_hint)
                 }
@@ -700,6 +705,12 @@ fun ZoomChips(
             .clip(RoundedCornerShape(28.dp))
             .background(CameraGlassStrong)
             .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(28.dp))
+            // Keep preview pinch/drag gestures from stealing taps on the chip row.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -707,9 +718,12 @@ fun ZoomChips(
         state.zoomChips.forEach { ratio ->
             val selected = kotlin.math.abs(state.activeZoomChip - ratio) < 0.12f
             val label = when {
-                ratio < 1f && kotlin.math.abs(ratio - 0.5f) < 0.08f -> ".5×"
-                ratio < 1f -> String.format("%.1f×", ratio)
-                else -> "${ratio.toInt()}×"
+                ratio < 1f -> {
+                    val formatted = String.format(java.util.Locale.US, "%.1f", ratio)
+                    if (formatted.startsWith("0.")) ".${formatted.substring(2)}×" else "${formatted}×"
+                }
+                ratio % 1.0f == 0.0f -> "${ratio.toInt()}×"
+                else -> String.format(java.util.Locale.US, "%.1f×", ratio)
             }
             Box(
                 modifier = Modifier
@@ -1284,5 +1298,40 @@ internal fun mediaThumbnail(file: File?): Any {
         R.drawable.ic_camera_video
     } finally {
         retriever.release()
+    }
+}
+
+@Composable
+fun PanoramaLivePreview(state: CameraUiState) {
+    AnimatedVisibility(
+        visible = state.panoramaActive,
+        enter = fadeIn(tween(160)) + expandVertically(tween(180)),
+        exit = fadeOut(tween(120)) + shrinkVertically(tween(140))
+    ) {
+        val scrollState = rememberScrollState()
+        LaunchedEffect(state.panoramaFrames.size) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy((-24).dp)
+        ) {
+            Spacer(modifier = Modifier.width(32.dp))
+            state.panoramaFrames.forEach { file ->
+                AsyncImage(
+                    model = file,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .height(80.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Spacer(modifier = Modifier.width(32.dp))
+        }
     }
 }
