@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arindam.camerax.ui.settings.SettingsActivity
+import com.arindam.camerax.ui.settings.SettingsScreen
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,5 +36,12 @@ class SettingsActivityInstrumentedTest {
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             scenario.state == Lifecycle.State.DESTROYED
         }
+    }
+
+    @Test
+    fun showsPhotoAspectInDefaultMode() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Photo aspect").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Frame for preview and stills").assertIsDisplayed()
     }
 }

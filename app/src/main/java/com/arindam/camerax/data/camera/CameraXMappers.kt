@@ -61,7 +61,7 @@ fun CameraExtension.toExtensionMode(): Int = when (this) {
     CameraExtension.BEAUTY -> ExtensionMode.FACE_RETOUCH
 }
 
-fun CaptureAspect.toResolutionSelector(): ResolutionSelector = when (this) {
+fun CaptureAspect.toCaptureResolutionSelector(): ResolutionSelector = when (this) {
     CaptureAspect.FULL, CaptureAspect.RATIO_16_9 -> ResolutionSelector.Builder()
         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
         .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
@@ -73,6 +73,17 @@ fun CaptureAspect.toResolutionSelector(): ResolutionSelector = when (this) {
         .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
         .build()
 }
+
+fun CaptureAspect.toPreviewResolutionSelector(): ResolutionSelector = when (this) {
+    CaptureAspect.FULL, CaptureAspect.RATIO_16_9 -> ResolutionSelector.Builder()
+        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+        .build()
+    CaptureAspect.RATIO_4_3 -> ResolutionSelector.Builder()
+        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+        .build()
+}
+
+fun CaptureAspect.toResolutionSelector(): ResolutionSelector = toCaptureResolutionSelector()
 
 fun VideoQuality.toQuality(): Quality = when (this) {
     VideoQuality.SD -> Quality.SD

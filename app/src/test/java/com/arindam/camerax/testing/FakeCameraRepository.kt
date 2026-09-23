@@ -87,6 +87,7 @@ class FakeCameraRepository : CameraRepository {
     override fun setZoomRatio(ratio: Float): ZoomInfo? = ZoomInfo(ratio, 1f, 10f)
     override fun tapToFocus(x: Float, y: Float) = Unit
     override fun setEffect(type: EffectMode) = Unit
+    override fun setDisplayRotation(rotation: Int) = Unit
     override fun setTargetRotation(rotation: Int) = Unit
     override fun setExposure(priority: ExposurePriority, iso: Int, shutterNanos: Long) = Unit
     override fun setExposureCompensation(index: Int) = Unit

@@ -96,7 +96,12 @@ class SetEffect(private val repository: CameraRepository) {
     operator fun invoke(type: EffectMode) = repository.setEffect(type)
 }
 
-/** Large-screen rotation. Does not rebind. */
+/** Large-screen / display rotation for preview. Does not rebind. */
+class SetDisplayRotation(private val repository: CameraRepository) {
+    operator fun invoke(rotation: Int) = repository.setDisplayRotation(rotation)
+}
+
+/** Capture orientation (EXIF / recording) for device tilt. Does not rebind. */
 class SetTargetRotation(private val repository: CameraRepository) {
     operator fun invoke(rotation: Int) = repository.setTargetRotation(rotation)
 }

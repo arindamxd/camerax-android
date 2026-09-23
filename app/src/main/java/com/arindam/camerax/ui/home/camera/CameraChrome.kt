@@ -76,6 +76,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -924,6 +925,7 @@ fun CameraFooter(
                     isRecording = state.isRecording,
                     panoramaActive = state.panoramaActive,
                     compact = compact,
+                    enabled = state.isCameraReady || state.isRecording || state.panoramaActive,
                     onClick = onShutterClicked
                 )
                 Spacer(Modifier.weight(1f))
@@ -949,6 +951,7 @@ fun ShutterButton(
     isRecording: Boolean,
     panoramaActive: Boolean = false,
     compact: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
@@ -960,10 +963,16 @@ fun ShutterButton(
         if (isRecording || panoramaActive) 0.22f else 0.5f,
         label = "shutterCorner"
     )
+    val alpha by animateFloatAsState(
+        if (enabled) 1f else 0.45f,
+        label = "shutterAlpha"
+    )
     Box(
         modifier = Modifier
             .size(if (compact) 64.dp else 84.dp)
+            .alpha(alpha)
             .clickable(
+                enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = ripple(bounded = false)
             ) {

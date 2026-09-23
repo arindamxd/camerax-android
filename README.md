@@ -19,7 +19,7 @@ The **app** is named CameraX. It is built with the Jetpack **CameraX library** (
 | In the app | What it demonstrates |
 | --- | --- |
 | **Photo** | Still capture with flash, timer, grid, pinch zoom, tap-to-focus |
-| **Video** | Record with audio, pause / resume, mute, 60 fps when listed, `.mp4` in gallery |
+| **Video** | Record with audio, pause / resume, mute, 60 fps when listed, 16:9 WYSIWYG preview & MP4 output |
 | **Slo-mo** | High-speed `Preview` + `VideoCapture` when the device lists SDR high-speed qualities |
 | **Effects** | Live ColorMatrix effects on `ImageAnalysis` (None, Grayscale, Invert, Sepia, Cool, Warm, Vivid) |
 | **Pano** | Horizontal sweep stitch |
@@ -93,7 +93,7 @@ Glass chrome controls (back, motion chip, Retake/Done, gallery actions) share **
 | Photo | `ImageCapture` |
 | Video, pause, mute | `VideoCapture` + `Recorder` + `Recording` |
 | Flash / torch | `ImageCapture.flashMode` + `CameraControl.enableTorch` |
-| Pinch zoom and 0.5 / 1x / 2x chips | `CameraControl.setZoomRatio` / `ZoomState` |
+| Dynamic optical zoom chips & pinch zoom | `CameraControl.setZoomRatio` / `ZoomState` / `CameraCharacteristics` |
 | Tap to focus | `FocusMeteringAction` |
 | HDR / Night / Portrait / Beauty | `ExtensionsManager` (`ExtensionMode`) |
 | Live color-matrix effects | `ImageAnalysis` + `ColorMatrix` / `ColorMatrixColorFilter` (`ColorEffectAnalyzer`) |
