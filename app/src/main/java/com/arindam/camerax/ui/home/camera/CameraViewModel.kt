@@ -920,30 +920,36 @@ class CameraViewModel(
             (_uiState.value.motionPhotoEnabled ||
                 externalCapture.kind == ExternalCaptureKind.MOTION_PHOTO)
         if (motion) _uiState.update { it.copy(motionCapturing = true) }
+        var feedbackTriggered = false
+        val triggerFeedback: () -> Unit = {
+            if (!feedbackTriggered) {
+                feedbackTriggered = true
+                playShutterSound(MediaActionSound.SHUTTER_CLICK)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    previewView.foreground = ColorDrawable(android.graphics.Color.WHITE)
+                    previewView.postDelayed(
+                        { previewView.foreground = null },
+                        ANIMATION_FAST_MILLIS
+                    )
+                }
+            }
+        }
         viewModelScope.launch {
             val result = interactors.capturePhoto(
                 outputDirectory = directory,
                 lens = _uiState.value.lens,
                 effect = _uiState.value.effect,
-                motionPhoto = motion
+                motionPhoto = motion,
+                onCaptureStarted = triggerFeedback
             )
             result.fold(
                 onSuccess = { file ->
-                    playShutterSound(MediaActionSound.SHUTTER_CLICK)
+                    triggerFeedback()
                     completeCapture(file, video = false) {
                         copy(
                             captureFlashToken = captureFlashToken + 1,
                             motionCapturing = false
                         )
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        previewView.postDelayed({
-                            previewView.foreground = ColorDrawable(android.graphics.Color.WHITE)
-                            previewView.postDelayed(
-                                { previewView.foreground = null },
-                                ANIMATION_FAST_MILLIS
-                            )
-                        }, ANIMATION_SLOW_MILLIS)
                     }
                 },
                 onFailure = { error ->

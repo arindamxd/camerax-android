@@ -42,7 +42,8 @@ interface CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit = {}
     ): Result<File>
 
     /** Starts video recording; returns the output file on success. */

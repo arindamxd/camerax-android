@@ -329,6 +329,7 @@ class CameraSession(private val context: Context) : CameraRepository {
             captureBuilder.setResolutionSelector(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
                     .build()
             )
         } else {
@@ -423,7 +424,8 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit
     ): Result<File> = suspendCancellableCoroutine { continuation ->
         val onSaved: (File) -> Unit = { file ->
             if (continuation.isActive) continuation.resume(Result.success(file))
@@ -438,9 +440,9 @@ class CameraSession(private val context: Context) : CameraRepository {
             stillFormat != StillFormat.HEIC_ULTRA_HDR &&
             videoCapture != null
         ) {
-            captureMotionPhoto(outputDirectory, lens, effect, onSaved, onError)
+            captureMotionPhoto(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
         } else {
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
         }
     }
 
@@ -741,12 +743,13 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
         val capture = imageCapture ?: return onError("Camera is not ready")
         if (stillFormat == StillFormat.RAW_JPEG) {
-            takeRawJpeg(capture, outputDirectory, lens, onSaved, onError)
+            takeRawJpeg(capture, outputDirectory, lens, onCaptureStarted, onSaved, onError)
             return
         }
         val extension = if (stillFormat == StillFormat.HEIC_ULTRA_HDR) {
@@ -766,6 +769,10 @@ class CameraSession(private val context: Context) : CameraRepository {
             options,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
+                override fun onCaptureStarted() {
+                    mainHandler.post { onCaptureStarted() }
+                }
+
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val file = output.savedUri?.toFile() ?: photoFile
                     val preserveHdr = stillFormat != StillFormat.JPEG
@@ -789,6 +796,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         capture: ImageCapture,
         outputDirectory: File,
         lens: CameraLens,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -812,6 +820,10 @@ class CameraSession(private val context: Context) : CameraRepository {
             jpegOptions,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
+                override fun onCaptureStarted() {
+                    mainHandler.post { onCaptureStarted() }
+                }
+
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val file = output.savedUri?.toFile()
                     when (output.imageFormat) {
@@ -834,12 +846,13 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
         if (imageCapture == null) {
             // No stills available; skip recording to avoid orphaned video.
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
             return
         }
         motionStill = null
@@ -860,7 +873,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         }
         if (videoFile == null) {
             motionAwaitingVideo = false
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
             return
         }
         motionVideo = videoFile
@@ -868,6 +881,7 @@ class CameraSession(private val context: Context) : CameraRepository {
             outputDirectory = outputDirectory,
             lens = lens,
             effect = effect,
+            onCaptureStarted = onCaptureStarted,
             onSaved = { file ->
                 motionStill = file
                 finishMotionIfReady()

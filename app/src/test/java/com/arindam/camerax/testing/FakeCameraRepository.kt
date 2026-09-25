@@ -58,8 +58,12 @@ class FakeCameraRepository : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
-    ): Result<File> = captureResult
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit
+    ): Result<File> {
+        onCaptureStarted()
+        return captureResult
+    }
 
     override fun startRecording(
         outputDirectory: File,
