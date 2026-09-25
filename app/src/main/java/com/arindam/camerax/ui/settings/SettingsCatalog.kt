@@ -46,7 +46,8 @@ fun settingsSections(
     fullSensorRawAvailable: Boolean = false,
     lowLightBoostAvailable: Boolean = false,
     videoFps60Available: Boolean = false,
-    microphonePermissionGranted: Boolean = true
+    microphonePermissionGranted: Boolean = true,
+    isVideoMode: Boolean = false
 ): List<SettingsSection> = listOf(
     SettingsSection(
         titleRes = R.string.pref_title_theme,
@@ -110,14 +111,19 @@ fun settingsSections(
             SettingsRow.Choice(
                 keyRes = R.string.pref_key_capture_aspect,
                 titleRes = R.string.pref_title_capture_aspect,
-                subtitleRes = R.string.pref_subtitle_capture_aspect,
+                subtitleRes = if (isVideoMode) {
+                    R.string.pref_subtitle_capture_aspect_video
+                } else {
+                    R.string.pref_subtitle_capture_aspect
+                },
                 icon = Icons.Outlined.Crop,
                 defaultValue = CaptureAspect.RATIO_4_3.prefValue,
                 options = listOf(
                     SettingsChoice(R.string.pref_aspect_4_3, CaptureAspect.RATIO_4_3.prefValue),
                     SettingsChoice(R.string.pref_aspect_16_9, CaptureAspect.RATIO_16_9.prefValue),
                     SettingsChoice(R.string.pref_aspect_full, CaptureAspect.FULL.prefValue)
-                )
+                ),
+                enabled = !isVideoMode
             ),
             SettingsRow.Toggle(
                 keyRes = R.string.pref_key_ultra_hdr,

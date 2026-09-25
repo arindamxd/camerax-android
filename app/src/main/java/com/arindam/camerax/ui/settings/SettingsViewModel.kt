@@ -18,7 +18,8 @@ import kotlinx.coroutines.withContext
 data class SettingsUiState(
     val features: DeviceCaptureFeatures = DeviceCaptureFeatures(),
     val versionLabel: String = "",
-    val microphonePermissionGranted: Boolean = true
+    val microphonePermissionGranted: Boolean = true,
+    val isVideoMode: Boolean = false
 )
 
 /**
@@ -29,10 +30,16 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val interactors: CameraInteractors,
     versionLabel: String,
+    isVideoMode: Boolean = false,
     private val dispatchers: AppDispatchers = AppDispatchers()
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SettingsUiState(versionLabel = versionLabel))
+    private val _uiState = MutableStateFlow(
+        SettingsUiState(
+            versionLabel = versionLabel,
+            isVideoMode = isVideoMode
+        )
+    )
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
