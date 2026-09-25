@@ -18,7 +18,7 @@ The **app** is named CameraX. It is built with the Jetpack **CameraX library** (
 
 | In the app | What it demonstrates |
 | --- | --- |
-| **Photo** | Still capture with flash, timer, grid, pinch zoom, tap-to-focus |
+| **Photo** | Still capture with instant shutter start feedback, high-speed binned capture, flash, timer, grid, pinch zoom, tap-to-focus |
 | **Video** | Record with audio, pause / resume, mute, 60 fps when listed, 16:9 WYSIWYG preview & MP4 output |
 | **Slo-mo** | High-speed `Preview` + `VideoCapture` when the device lists SDR high-speed qualities |
 | **Effects** | Live ColorMatrix effects on `ImageAnalysis` (None, Grayscale, Invert, Sepia, Cool, Warm, Vivid) |
@@ -31,9 +31,9 @@ Unsupported OEM chips stay hidden. If a device cannot bind preview + photo + vid
 
 1. Grant **camera** and **microphone**.
 2. Swipe **Photo / Video / Slo-mo / Effects / Pano / Dual** at the bottom (Slo-mo and Dual hide when unsupported). Quick controls on the live feed change with the selected mode; the gear opens full Settings.
-3. Photo shutter is a white disc; video is red and becomes a stop square while recording.
+3. Photo shutter is a white disc with tactile spring press feedback; video is red and becomes a stop square while recording.
 4. In **Effects**, pick None / Grayscale / Invert / Sepia / Cool / Warm / Vivid. The live feed is the processed `ImageAnalysis` frame; switching chips does not rebind.
-5. Open the thumbnail to browse, share, or delete photos and videos.
+5. Open the thumbnail to browse, share, or delete photos and videos. Pinch to zoom in / out (up to 6×), pan across details, or double-tap to zoom.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ app/src/main/java/com/arindam/camerax/
   ui/home/camera/        CameraScreen, CameraChrome, CameraViewModel
   ui/home/gallery/       Photo + video pager
   ui/settings/           SettingsCatalog + SettingsScreen
-  ui/compose/            CameraGlassButton, ChromeActionPill (ChromeControlSize = 44.dp)
+  ui/compose/            CameraGlassButton, ChromeActionPill (ChromeControlSize = 44.dp), ZoomableImage
 ```
 
 Glass chrome controls (back, motion chip, Retake/Done, gallery actions) share **`ChromeControlSize` (44dp)**. Full-screen headers use **20dp** side / **8dp** top padding after `safeDrawing` only — see [AGENTS.md](AGENTS.md#chrome-control-size) and [header padding](AGENTS.md#chrome-screen-insets--header-padding).
