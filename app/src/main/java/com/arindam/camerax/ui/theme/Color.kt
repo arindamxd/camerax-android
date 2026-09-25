@@ -79,13 +79,15 @@ val md_theme_dark_scrim = Color(0xFF000000)
  * [ThemedOverlayChrome.accent] on Settings / Gallery / Tools so Light theme gets a
  * deeper teal with readable contrast.
  */
-val CameraAccent = Color(0xFF00E8BE)
-/** Light-theme accent — same mint family, darker for white surfaces. */
-val CameraAccentLight = Color(0xFF006B5C)
+val CameraAccent = Color(0xFFFFCC00)
+/** Light-theme accent — warm amber for readable contrast on light surfaces. */
+val CameraAccentLight = Color(0xFFD49B00)
+val CameraIosYellow = Color(0xFFFFCC00)
 val CameraOnAccent = Color(0xFF000000)
 val CameraOnAccentLight = Color(0xFFFFFFFF)
-val CameraDanger = Color(0xFFFF375F)
+val CameraDanger = Color(0xFFFF3B30)
 val CameraGlass = Color(0x73000000)
 val CameraGlassStrong = Color(0xA6000000)
 val CameraOnGlass = Color(0xFFFFFFFF)
 val CameraOnGlassMuted = Color(0x99FFFFFF)
+

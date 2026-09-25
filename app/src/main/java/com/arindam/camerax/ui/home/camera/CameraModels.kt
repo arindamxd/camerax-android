@@ -83,6 +83,31 @@ val EffectMode.labelRes: Int
         EffectMode.VIVID -> R.string.effect_vivid
     }
 
+val EffectMode.styleTitleRes: Int
+    @StringRes get() = when (this) {
+        EffectMode.NONE -> R.string.style_standard
+        EffectMode.VIVID -> R.string.style_vibrant
+        EffectMode.WARM -> R.string.style_warm
+        EffectMode.COOL -> R.string.style_cool
+        EffectMode.SEPIA -> R.string.style_dramatic
+        EffectMode.GRAYSCALE -> R.string.style_mono
+        EffectMode.INVERT -> R.string.style_invert
+    }
+
+val CaptureAspect.labelRes: Int
+    @StringRes get() = when (this) {
+        CaptureAspect.RATIO_4_3 -> R.string.pref_aspect_4_3
+        CaptureAspect.RATIO_16_9 -> R.string.pref_aspect_16_9
+        CaptureAspect.FULL -> R.string.pref_aspect_full
+    }
+
+val CaptureAspect.shortLabel: String
+    get() = when (this) {
+        CaptureAspect.RATIO_4_3 -> "4:3"
+        CaptureAspect.RATIO_16_9 -> "16:9"
+        CaptureAspect.FULL -> "FULL"
+    }
+
 /**
  * Presentation state for the live feed. Chrome flags are derived from
  * [com.arindam.camerax.domain.model.CameraModeCatalog]; do not scatter `if (mode == …)` in UI.
@@ -222,6 +247,13 @@ data class CameraUiState(
 
     val showsEffects: Boolean
         get() = profile.showsEffects
+
+    val allowsEffect: Boolean
+        get() = profile.allowsEffect
+
+    val showsAspectControl: Boolean
+        get() = (mode == CameraMode.PHOTO || mode == CameraMode.EFFECTS) &&
+            !isRecording && !panoramaActive
 
     val showsPip: Boolean
         get() = profile.showsPip

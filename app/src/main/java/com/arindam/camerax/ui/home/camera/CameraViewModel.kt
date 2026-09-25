@@ -39,6 +39,7 @@ import com.arindam.camerax.domain.model.PhysicalZoom
 import com.arindam.camerax.domain.model.profile
 import com.arindam.camerax.domain.model.RecordingEvent
 import com.arindam.camerax.domain.model.StillFormat
+import com.arindam.camerax.domain.model.VideoQuality
 import com.arindam.camerax.util.commons.Constants
 import com.arindam.camerax.util.commons.Constants.UI.ANIMATION_FAST_MILLIS
 import com.arindam.camerax.util.commons.Constants.UI.ANIMATION_SLOW_MILLIS
@@ -219,7 +220,7 @@ class CameraViewModel(
                             } else {
                                 CameraExtension.NONE
                             },
-                            effect = if (profile.showsEffects) {
+                            effect = if (profile.allowsEffect) {
                                 state.effect
                             } else {
                                 EffectMode.NONE
@@ -488,7 +489,7 @@ class CameraViewModel(
                 },
                 autoNightActive = if (profile.clearsSessionExtras) false else it.autoNightActive,
                 motionPhotoEnabled = if (profile.clearsSessionExtras) false else it.motionPhotoEnabled,
-                effect = if (profile.showsEffects) it.effect else EffectMode.NONE,
+                effect = if (profile.allowsEffect) it.effect else EffectMode.NONE,
                 effectFrame = if (profile.showsEffects) it.effectFrame else null,
                 bindRevision = if (rebind) it.bindRevision + 1 else it.bindRevision
             )
@@ -555,6 +556,11 @@ class CameraViewModel(
             }
             start()
         }
+    }
+
+    fun setZoomContinuous(ratio: Float) {
+        cancelZoomAnimation()
+        applyDigitalZoom(ratio)
     }
 
     private fun effectiveMinZoom(state: CameraUiState): Float {
@@ -646,8 +652,18 @@ class CameraViewModel(
         focusJob?.cancel()
         _uiState.update { it.copy(focusPoint = screenOffset) }
         focusJob = viewModelScope.launch {
-            delay(900)
+            delay(2500)
             _uiState.update { it.copy(focusPoint = null) }
+        }
+    }
+
+    fun keepFocusPointActive() {
+        if (_uiState.value.focusPoint != null) {
+            focusJob?.cancel()
+            focusJob = viewModelScope.launch {
+                delay(2500)
+                _uiState.update { it.copy(focusPoint = null) }
+            }
         }
     }
 
@@ -660,6 +676,32 @@ class CameraViewModel(
                 autoNightActive = false,
                 bindRevision = it.bindRevision + 1
             )
+        }
+    }
+
+    fun toggleNightMode() {
+        val state = _uiState.value
+        if (state.isRecording || state.motionCapturing || state.lockCaptureMode || state.rawCapture) return
+        if (CameraExtension.NIGHT !in state.supportedExtensions) return
+        if (state.extension == CameraExtension.NIGHT) {
+            manualExtension = true
+            _uiState.update {
+                it.copy(
+                    extension = CameraExtension.NONE,
+                    autoNightActive = false,
+                    bindRevision = it.bindRevision + 1
+                )
+            }
+        } else {
+            manualExtension = false
+            _uiState.update {
+                it.copy(
+                    extension = CameraExtension.NIGHT,
+                    autoNightActive = state.nightScene == NightScene.RECOMMENDED,
+                    motionPhotoEnabled = false,
+                    bindRevision = it.bindRevision + 1
+                )
+            }
         }
     }
 
@@ -724,16 +766,72 @@ class CameraViewModel(
         interactors.setEffect(type)
     }
 
+    fun setCaptureAspect(aspect: CaptureAspect) {
+        val state = _uiState.value
+        if (state.captureAspect == aspect) return
+        if (state.mode == CameraMode.VIDEO || state.mode == CameraMode.SLOW_MOTION || state.mode == CameraMode.DUAL) return
+        _uiState.update {
+            it.copy(
+                captureAspect = aspect,
+                bindRevision = it.bindRevision + 1
+            )
+        }
+        persistChrome()
+    }
+
+    fun cycleCaptureAspect() {
+        val state = _uiState.value
+        val nextAspect = when (state.captureAspect) {
+            CaptureAspect.RATIO_4_3 -> CaptureAspect.RATIO_16_9
+            CaptureAspect.RATIO_16_9 -> CaptureAspect.FULL
+            CaptureAspect.FULL -> CaptureAspect.RATIO_4_3
+        }
+        setCaptureAspect(nextAspect)
+    }
+
+    fun cycleVideoQuality() {
+        val state = _uiState.value
+        if (state.isRecording || state.mode == CameraMode.SLOW_MOTION) return
+        val nextQuality = when (state.videoQuality) {
+            VideoQuality.FHD -> VideoQuality.UHD
+            VideoQuality.UHD -> VideoQuality.HD
+            VideoQuality.HD -> VideoQuality.FHD
+            else -> VideoQuality.FHD
+        }
+        _uiState.update {
+            it.copy(
+                videoQuality = nextQuality,
+                bindRevision = it.bindRevision + 1
+            )
+        }
+    }
+
+    fun toggleVideoFps60() {
+        val state = _uiState.value
+        if (state.isRecording || !state.videoFps60Supported || state.mode == CameraMode.SLOW_MOTION) return
+        val nextFps60 = !state.videoFps60
+        _uiState.update {
+            it.copy(
+                videoFps60 = nextFps60,
+                bindRevision = it.bindRevision + 1
+            )
+        }
+    }
+
     fun onShutter(previewView: PreviewView) {
         val state = _uiState.value
         if (!state.isCameraReady && !state.isRecording && !state.panoramaActive) return
         if (state.review != null) return
         if (state.showsTools) return
         if (state.motionCapturing) return
+        if (state.isRecording) {
+            stopRecording()
+            return
+        }
         when (state.captureAction) {
             CaptureAction.VIDEO -> {
                 if (state.showsSlowMotionFps && !state.slowMotionSupported) return
-                if (state.isRecording) stopRecording() else viewModelScope.launch { startRecording() }
+                viewModelScope.launch { startRecording() }
             }
             CaptureAction.PANORAMA -> {
                 if (state.panoramaActive) finishPanorama() else startPanorama(previewView)
@@ -746,6 +844,21 @@ class CameraViewModel(
                     takePhoto(previewView)
                 }
             }
+        }
+    }
+
+    fun startQuickTake() {
+        val state = _uiState.value
+        if (state.isRecording || state.review != null || state.showsTools || state.motionCapturing) return
+        viewModelScope.launch {
+            startRecording()
+        }
+    }
+
+    fun stopQuickTake() {
+        val state = _uiState.value
+        if (state.isRecording) {
+            stopRecording()
         }
     }
 
@@ -925,6 +1038,7 @@ class CameraViewModel(
             if (!feedbackTriggered) {
                 feedbackTriggered = true
                 playShutterSound(MediaActionSound.SHUTTER_CLICK)
+                _uiState.update { it.copy(captureFlashToken = it.captureFlashToken + 1) }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     previewView.foreground = ColorDrawable(android.graphics.Color.WHITE)
                     previewView.postDelayed(
@@ -946,10 +1060,7 @@ class CameraViewModel(
                 onSuccess = { file ->
                     triggerFeedback()
                     completeCapture(file, video = false) {
-                        copy(
-                            captureFlashToken = captureFlashToken + 1,
-                            motionCapturing = false
-                        )
+                        copy(motionCapturing = false)
                     }
                 },
                 onFailure = { error ->
@@ -1294,6 +1405,7 @@ class CameraViewModel(
         private const val STATE_MODE = "camera_mode"
         private const val STATE_LENS = "camera_lens"
         private const val STATE_FLASH = "camera_flash"
+        private const val STATE_ASPECT = "camera_aspect"
         private const val PANO_TEMP_DIR = "pano_temp"
     }
 
@@ -1307,12 +1419,16 @@ class CameraViewModel(
         val flash = savedState.get<String>(STATE_FLASH)?.let { name ->
             runCatching { FlashMode.valueOf(name) }.getOrNull()
         }
-        if (mode == null && lens == null && flash == null) return
+        val aspect = savedState.get<String>(STATE_ASPECT)?.let { name ->
+            runCatching { CaptureAspect.valueOf(name) }.getOrNull()
+        }
+        if (mode == null && lens == null && flash == null && aspect == null) return
         _uiState.update {
             it.copy(
                 mode = mode ?: it.mode,
                 lens = lens ?: it.lens,
-                flash = flash ?: it.flash
+                flash = flash ?: it.flash,
+                captureAspect = aspect ?: it.captureAspect
             )
         }
     }
@@ -1322,6 +1438,7 @@ class CameraViewModel(
         savedState[STATE_MODE] = state.mode.name
         savedState[STATE_LENS] = state.lens.name
         savedState[STATE_FLASH] = state.flash.name
+        savedState[STATE_ASPECT] = state.captureAspect.name
     }
 
     private suspend fun refreshThumbnail() {
