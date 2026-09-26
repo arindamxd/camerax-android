@@ -93,7 +93,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -284,20 +287,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         } else {
             previewBuilder.setResolutionSelector(config.captureAspect.toPreviewResolutionSelector())
         }
-        Camera2Interop.Extender(previewBuilder).apply {
-            setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-            setCaptureRequestOption(
-                CaptureRequest.EDGE_MODE,
-                CaptureRequest.EDGE_MODE_HIGH_QUALITY
-            )
-            setCaptureRequestOption(
-                CaptureRequest.NOISE_REDUCTION_MODE,
-                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
-            )
-        }
+
         val cameraInfo = stillInfo
         val wantStab = config.videoStabilization && !useExtension
         val previewStab = wantStab && isPreviewStabilizationSupported(cameraInfo)
@@ -307,7 +297,6 @@ class CameraSession(private val context: Context) : CameraRepository {
         val liveEffects = config.liveEffects && !useRaw
         val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
         this.preview = preview
-
         val captureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setFlashMode(config.flash.toImageCaptureMode())
@@ -776,12 +765,14 @@ class CameraSession(private val context: Context) : CameraRepository {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val file = output.savedUri?.toFile() ?: photoFile
                     val preserveHdr = stillFormat != StillFormat.JPEG
-                    val processed = if (preserveHdr) {
-                        file
+                    if (preserveHdr) {
+                        onSaved(file)
                     } else {
-                        applyStillOutput(file, effect)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val processed = applyStillOutput(file, effect)
+                            onSaved(processed)
+                        }
                     }
-                    onSaved(processed)
                 }
 
                 override fun onError(exception: ImageCaptureException) {

@@ -15,7 +15,7 @@ import androidx.camera.core.ImageCapture
 import android.util.Size
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
+
 import androidx.camera.extensions.ExtensionMode
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.Quality
@@ -64,11 +64,9 @@ fun CameraExtension.toExtensionMode(): Int = when (this) {
 fun CaptureAspect.toCaptureResolutionSelector(): ResolutionSelector = when (this) {
     CaptureAspect.FULL, CaptureAspect.RATIO_16_9 -> ResolutionSelector.Builder()
         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
         .build()
     CaptureAspect.RATIO_4_3 -> ResolutionSelector.Builder()
         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
         .build()
 }
 
