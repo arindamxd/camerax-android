@@ -13,6 +13,7 @@ import android.view.Surface
 import android.widget.Toast
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,15 +27,23 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import com.arindam.camerax.util.log.Logger
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +68,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.arindam.camerax.R
 import com.arindam.camerax.domain.model.CameraLens
+import com.arindam.camerax.domain.model.CameraMode
+import com.arindam.camerax.domain.model.CaptureAction
+import com.arindam.camerax.domain.model.CaptureAspect
+import com.arindam.camerax.domain.model.profile
 import kotlin.math.abs
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -92,7 +106,7 @@ fun CameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            scaleType = PreviewView.ScaleType.FIT_CENTER
             isClickable = false
             isFocusable = false
         }
@@ -100,12 +114,20 @@ fun CameraScreen(
 
     var keepPreview by remember { mutableStateOf(true) }
     var showActiveCaptureExitDialog by rememberSaveable { mutableStateOf(false) }
+    var drawerOpen by rememberSaveable { mutableStateOf(false) }
+    var stylesTrayOpen by rememberSaveable { mutableStateOf(false) }
+    var aspectTrayOpen by rememberSaveable { mutableStateOf(false) }
     val activeCaptureInProgress = state.isRecording || state.panoramaActive
     BackHandler(enabled = activeCaptureInProgress) {
         showActiveCaptureExitDialog = true
     }
-    LaunchedEffect(activeCaptureInProgress) {
+    LaunchedEffect(activeCaptureInProgress, state.mode) {
         if (!activeCaptureInProgress) showActiveCaptureExitDialog = false
+        if (activeCaptureInProgress || state.showsTools) {
+            drawerOpen = false
+            stylesTrayOpen = false
+            aspectTrayOpen = false
+        }
     }
     LaunchedEffect(
         state.bindRevision,
@@ -125,12 +147,12 @@ fun CameraScreen(
                 lifecycleOwner,
                 previewView
             )
-            previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+            previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
         }
     }
     LaunchedEffect(configuration.orientation, configuration.screenWidthDp) {
         if (!inspection) {
-            previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+            previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
         }
     }
     LaunchedEffect(state.message, state.messageRes) {
@@ -151,7 +173,7 @@ fun CameraScreen(
             override fun onDisplayRemoved(displayId: Int) = Unit
             override fun onDisplayChanged(displayId: Int) {
                 if (previewView.display?.displayId == displayId) {
-                    previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+                    previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
                 }
             }
         }
@@ -202,6 +224,33 @@ fun CameraScreen(
         onDispose { manager.unregisterListener(listener) }
     }
 
+    var deviceRollAngle by remember { mutableFloatStateOf(0f) }
+    var isDeviceFlat by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val manager = context.getSystemService(SensorManager::class.java)
+        val sensor = manager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (sensor == null) return@DisposableEffect onDispose { }
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val gx = event.values[0]
+                val gy = event.values[1]
+                val gxy = kotlin.math.sqrt(gx * gx + gy * gy)
+                if (gxy < 2.5f) {
+                    isDeviceFlat = true
+                    return
+                }
+                isDeviceFlat = false
+                val angle = Math.toDegrees(kotlin.math.atan2(gx.toDouble(), gy.toDouble())).toFloat()
+                val nearest = kotlin.math.round(angle / 90f) * 90f
+                deviceRollAngle = angle - nearest
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { manager.unregisterListener(listener) }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxHeight < 480.dp ||
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -209,6 +258,44 @@ fun CameraScreen(
         var headerHeightPx by remember { mutableIntStateOf(0) }
         var footerHeightPx by remember { mutableIntStateOf(0) }
         val headerHeightForFocus by rememberUpdatedState(headerHeightPx)
+        val isVideoSession = state.mode.profile().captureAction == CaptureAction.VIDEO ||
+            state.mode.profile().bindSlowMotion ||
+            state.mode.profile().bindConcurrent
+        val is43 = !isVideoSession && state.captureAspect == CaptureAspect.RATIO_4_3
+        val is169 = isVideoSession || state.captureAspect == CaptureAspect.RATIO_16_9
+
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val activeAspect = when {
+            is43 -> if (isLandscape) 4f / 3f else 3f / 4f
+            is169 -> if (isLandscape) 16f / 9f else 9f / 16f
+            else -> null
+        }
+
+        var previewTopPx by remember { mutableIntStateOf(0) }
+        var previewLeftPx by remember { mutableIntStateOf(0) }
+        var previewWidthPx by remember { mutableIntStateOf(0) }
+        var previewHeightPx by remember { mutableIntStateOf(0) }
+
+        val verticalShift = if (is43 && !isLandscape && headerHeightPx > 0 && footerHeightPx > 0) {
+            with(density) { ((headerHeightPx - footerHeightPx) / 2).toDp() }
+        } else {
+            0.dp
+        }
+
+        val viewfinderModifier = if (activeAspect != null) {
+            if (isLandscape) {
+                Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(activeAspect, matchHeightConstraintsFirst = true)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(activeAspect)
+            }
+        } else {
+            Modifier.fillMaxSize()
+        }
+
         Box(
             Modifier
                 .fillMaxSize()
@@ -220,34 +307,67 @@ fun CameraScreen(
                     }
                 )
         ) {
-            if (keepPreview) {
-                if (state.showsEffects) {
-                    AndroidView(
-                        factory = { previewView },
-                        modifier = Modifier.size(1.dp)
-                    )
-                    val effectFrame = state.effectFrame
-                    if (effectFrame != null) {
-                        Image(
-                            bitmap = effectFrame,
-                            contentDescription = stringResource(R.string.effect_frame_description),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = if (state.lens == CameraLens.FRONT && state.frontMirror) {
-                                        -1f
-                                    } else {
-                                        1f
-                                    }
-                                },
-                            contentScale = ContentScale.Crop
-                        )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset(y = verticalShift),
+                contentAlignment = Alignment.Center
+            ) {
+                val cornerRadius = if (activeAspect != null) 16.dp else 0.dp
+                Box(
+                    modifier = viewfinderModifier
+                        .animateContentSize(animationSpec = tween(280))
+                        .clip(RoundedCornerShape(cornerRadius))
+                        .clipToBounds()
+                        .onGloballyPositioned {
+                            val pos = it.positionInRoot()
+                            previewLeftPx = pos.x.toInt()
+                            previewTopPx = pos.y.toInt()
+                            previewWidthPx = it.size.width
+                            previewHeightPx = it.size.height
+                            Logger.debug(
+                                "CameraScreen",
+                                "Viewfinder: is43=$is43 is169=$is169 aspect=$activeAspect " +
+                                    "size=${it.size.width}x${it.size.height} top=$previewTopPx left=$previewLeftPx"
+                            )
+                        }
+                ) {
+                    if (keepPreview) {
+                        if (state.showsEffects) {
+                            AndroidView(
+                                factory = { previewView },
+                                modifier = Modifier.size(1.dp)
+                            )
+                            val effectFrame = state.effectFrame
+                            if (effectFrame != null) {
+                                Image(
+                                    bitmap = effectFrame,
+                                    contentDescription = stringResource(R.string.effect_frame_description),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleX = if (state.lens == CameraLens.FRONT && state.frontMirror) {
+                                                -1f
+                                            } else {
+                                                1f
+                                            }
+                                        },
+                                    contentScale = if (is43 || is169) ContentScale.Fit else ContentScale.Crop
+                                )
+                            }
+                        } else {
+                            AndroidView(
+                                factory = { previewView },
+                                modifier = Modifier.fillMaxSize(),
+                                update = { view ->
+                                    view.requestLayout()
+                                }
+                            )
+                        }
                     }
-                } else {
-                    AndroidView(
-                        factory = { previewView },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (state.gridEnabled) {
+                        RuleOfThirdsGrid()
+                    }
                 }
             }
             Box(
@@ -265,7 +385,7 @@ fun CameraScreen(
                                     top = with(density) { headerHeightPx.toDp() },
                                     bottom = with(density) { footerHeightPx.toDp() }
                                 )
-                                .pointerInput(previewView, state.showsZoomChips) {
+                                .pointerInput(previewView, state.showsZoomChips, state.focusPoint) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = true)
                                     val start = down.position
@@ -273,7 +393,15 @@ fun CameraScreen(
                                     var dragged = false
                                     var pinch = false
                                     var cumulativeZoom = 1f
-                                    if (state.showsZoomChips) {
+
+                                    val screenStart = Offset(start.x, start.y + headerHeightForFocus.toFloat())
+                                    val currentFocus = state.focusPoint
+                                    val isNearFocus = currentFocus != null &&
+                                        (screenStart - currentFocus).getDistance() <= 80.dp.toPx()
+                                    val startEv = state.exposureCompensation
+                                    val evLimits = state.exposureLimits
+
+                                    if (state.showsZoomChips && !isNearFocus) {
                                         viewModel.beginZoomGesture()
                                     }
                                     while (true) {
@@ -288,43 +416,73 @@ fun CameraScreen(
                                             pressed.forEach { change ->
                                                 if (change.positionChanged()) change.consume()
                                             }
-                                        } else if (state.showsZoomChips && !pinch) {
+                                        } else if (isNearFocus && !pinch) {
+                                            val pointer = pressed.first()
+                                            val dy = pointer.position.y - start.y
+                                            if (abs(dy) > slop * 0.4f) {
+                                                dragged = true
+                                                val evStepPx = 18.dp.toPx()
+                                                val deltaEv = (-dy / evStepPx).toInt()
+                                                val newEv = (startEv + deltaEv).coerceIn(evLimits.evMin, evLimits.evMax)
+                                                viewModel.setExposureCompensation(newEv)
+                                                viewModel.keepFocusPointActive()
+                                                if (pointer.positionChanged()) pointer.consume()
+                                            }
+                                        } else if (!pinch) {
                                             val pointer = pressed.first()
                                             val dx = pointer.position.x - start.x
                                             val dy = pointer.position.y - start.y
                                             if (abs(dx) > slop || abs(dy) > slop) {
-                                                if (abs(dy) >= abs(dx)) {
-                                                    dragged = true
+                                                dragged = true
+                                                if (dy < -slop * 2.0f) {
+                                                    drawerOpen = true
+                                                    if (pointer.positionChanged()) pointer.consume()
+                                                } else if (dy > slop * 2.0f) {
+                                                    drawerOpen = false
+                                                    if (pointer.positionChanged()) pointer.consume()
+                                                } else if (state.showsZoomChips && abs(dy) >= abs(dx)) {
                                                     viewModel.zoomByDrag(dy, size.height.toFloat())
                                                     if (pointer.positionChanged()) pointer.consume()
-                                                } else {
-                                                    break
                                                 }
                                             }
-                                        } else {
-                                            val pointer = pressed.first()
-                                            val dx = pointer.position.x - start.x
-                                            val dy = pointer.position.y - start.y
-                                            if (abs(dx) > slop || abs(dy) > slop) dragged = true
                                         }
                                     }
                                     if (!dragged) {
-                                        // Map tap into full PreviewView coords (gesture layer is inset).
-                                        val focus = Offset(
-                                            start.x,
-                                            start.y + headerHeightForFocus.toFloat()
+                                        val screenX = start.x
+                                        val screenY = start.y + headerHeightForFocus.toFloat()
+                                        val localX = screenX - previewLeftPx
+                                        val localY = screenY - previewTopPx
+                                        val targetWidth = if (previewWidthPx > 0) previewWidthPx else previewView.width
+                                        val targetHeight = if (previewHeightPx > 0) previewHeightPx else previewView.height
+                                        val clampedX = localX.coerceIn(0f, targetWidth.toFloat())
+                                        val clampedY = localY.coerceIn(0f, targetHeight.toFloat())
+                                        viewModel.tapToFocus(
+                                            previewView = previewView,
+                                            localOffset = Offset(clampedX, clampedY),
+                                            screenOffset = Offset(screenX, screenY)
                                         )
-                                        viewModel.tapToFocus(previewView, focus)
                                     }
                                 }
                             }
                         }
                     )
             )
-            if (state.gridEnabled) {
-                RuleOfThirdsGrid()
+            FocusRing(
+                point = state.focusPoint,
+                exposureIndex = state.exposureCompensation,
+                evMin = state.exposureLimits.evMin,
+                evMax = state.exposureLimits.evMax
+            )
+            // iOS 17/18 Horizon Level Indicator
+            if (!state.isRecording && !state.showsTools && !state.panoramaActive) {
+                HorizonLevelIndicator(
+                    rollAngle = deviceRollAngle,
+                    isFlat = isDeviceFlat,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .zIndex(0.9f)
+                )
             }
-            FocusRing(state.focusPoint)
             AnimatedVisibility(
                 visible = state.showsTools,
                 modifier = Modifier.zIndex(0.7f),
@@ -344,6 +502,22 @@ fun CameraScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+            var flashTriggered by remember { mutableStateOf(false) }
+            LaunchedEffect(state.captureFlashToken) {
+                if (state.captureFlashToken > 0) {
+                    flashTriggered = true
+                    delay(80)
+                    flashTriggered = false
+                }
+            }
+            if (flashTriggered) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.75f))
+                        .zIndex(2.5f)
+                )
+            }
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -353,6 +527,16 @@ fun CameraScreen(
                 CameraHeader(
                     state = state,
                     compact = compact,
+                    drawerOpen = drawerOpen,
+                    onToggleDrawer = { drawerOpen = !drawerOpen },
+                    stylesOpen = stylesTrayOpen,
+                    onStylesToggle = {
+                        stylesTrayOpen = !stylesTrayOpen
+                        if (stylesTrayOpen) aspectTrayOpen = false
+                    },
+                    onNightClicked = viewModel::toggleNightMode,
+                    onCycleVideoQuality = viewModel::cycleVideoQuality,
+                    onToggleVideoFps = viewModel::toggleVideoFps60,
                     onFlashClicked = viewModel::cycleFlash,
                     onTimerClicked = viewModel::cycleTimer,
                     onGridClicked = viewModel::toggleGrid,
@@ -388,12 +572,36 @@ fun CameraScreen(
                 CameraFooter(
                     state = state,
                     compact = compact,
+                    drawerOpen = drawerOpen,
+                    stylesOpen = stylesTrayOpen,
+                    onStylesToggle = {
+                        stylesTrayOpen = !stylesTrayOpen
+                        if (stylesTrayOpen) aspectTrayOpen = false
+                    },
+                    aspectOpen = aspectTrayOpen,
+                    onAspectToggle = {
+                        aspectTrayOpen = !aspectTrayOpen
+                        if (aspectTrayOpen) stylesTrayOpen = false
+                    },
+                    onAspectSelected = viewModel::setCaptureAspect,
+                    onNightClicked = viewModel::toggleNightMode,
                     onModeSelected = viewModel::setMode,
                     onFlipClicked = viewModel::toggleLens,
                     onShutterClicked = { viewModel.onShutter(previewView) },
                     onGalleryClicked = onGalleryClicked,
                     onEffectSelected = viewModel::setEffect,
-                    onZoomSelected = viewModel::setZoom
+                    onZoomSelected = viewModel::setZoom,
+                    onZoomContinuous = viewModel::setZoomContinuous,
+                    onQuickTakeStart = viewModel::startQuickTake,
+                    onQuickTakeStop = viewModel::stopQuickTake,
+                    onFlashClicked = viewModel::cycleFlash,
+                    onTimerClicked = viewModel::cycleTimer,
+                    onGridClicked = viewModel::toggleGrid,
+                    onMotionClicked = viewModel::toggleMotionPhoto,
+                    onExposurePrioritySelected = viewModel::setExposurePriority,
+                    onIsoChanged = viewModel::setIso,
+                    onShutterChanged = viewModel::setShutterNanos,
+                    onCompensationChanged = viewModel::setExposureCompensation
                 )
             }
             CountdownOverlay(state.countdownRemaining)
@@ -429,7 +637,8 @@ private fun CameraChromePreview() {
         mode = com.arindam.camerax.domain.model.CameraMode.PHOTO,
         zoomRatio = 1f,
         minZoom = 0.5f,
-        maxZoom = 5f
+        maxZoom = 5f,
+        isCameraReady = true
     )
     AppTheme {
         Box(Modifier.fillMaxSize()) {

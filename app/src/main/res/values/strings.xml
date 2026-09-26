@@ -58,6 +58,9 @@
     <string name="ultrahdr">Ultra HDR</string>
     <string name="ultrahdr_heic">Ultra HDR HEIC</string>
     <string name="raw_dng">RAW / DNG</string>
+    <string name="expand_controls">Expand controls</string>
+    <string name="collapse_controls">Collapse controls</string>
+    <string name="quicktake_lock">Lock recording</string>
     <string name="video_fps_60_on">60 fps</string>
     <string name="video_stabilization_on">Stabilized</string>
     <string name="low_light_boost_on">Low light boost</string>
@@ -110,6 +113,18 @@
     <string name="effect_warm">Warm</string>
     <string name="effect_vivid">Vivid</string>
     <string name="effect_frame_description">Effect camera frame</string>
+
+    <!-- Photographic Styles (iOS style) -->
+    <string name="photographic_styles">Photographic Styles</string>
+    <string name="style_standard">Standard</string>
+    <string name="style_vibrant">Vibrant</string>
+    <string name="style_warm">Warm</string>
+    <string name="style_cool">Cool</string>
+    <string name="style_dramatic">Dramatic</string>
+    <string name="style_mono">Mono</string>
+    <string name="style_invert">Invert</string>
+    <string name="style_reset">Reset</string>
+    <string name="filter_button">Photographic Styles</string>
 
     <!-- Capture confirmation -->
     <string name="capture_review_retake">Retake</string>
@@ -309,6 +324,7 @@
     <string name="pref_subtitle_raw_full_sensor_unsupported">This device doesn\'t support full-sensor RAW</string>
     <string name="pref_title_capture_aspect">Photo aspect</string>
     <string name="pref_subtitle_capture_aspect">Frame for preview and stills</string>
+    <string name="pref_subtitle_capture_aspect_video">Fixed to 16:9 for video</string>
     <string name="pref_aspect_4_3">4:3</string>
     <string name="pref_aspect_16_9">16:9</string>
     <string name="pref_aspect_full">Full</string>

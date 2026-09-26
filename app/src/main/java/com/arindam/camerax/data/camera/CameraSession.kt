@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
+import android.util.Rational
 import android.util.Size
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -25,6 +26,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraUnavailableException
 import androidx.camera.core.CompositionSettings
 import androidx.camera.core.ConcurrentCamera.SingleCameraConfig
 import androidx.camera.core.DynamicRange
@@ -32,12 +34,14 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.InitializationException
 import androidx.camera.core.LowLightBoostState
 import androidx.camera.core.MirrorMode
 import androidx.camera.core.Preview
 import androidx.camera.core.SessionConfig
 import androidx.camera.core.UseCase
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.core.featuregroup.GroupableFeature
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -89,6 +93,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -198,12 +206,31 @@ class CameraSession(private val context: Context) : CameraRepository {
         preview = null
 
         previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-        previewView.scaleType = if (config.slowMotion || config.captureAspect == CaptureAspect.FULL) {
+        val isVideoSession = config.isVideoMode || config.slowMotion || config.concurrent
+        previewView.scaleType = if (config.captureAspect == CaptureAspect.FULL && !isVideoSession) {
             PreviewView.ScaleType.FILL_CENTER
         } else {
             PreviewView.ScaleType.FIT_CENTER
         }
         val rotation = previewView.display?.rotation ?: Surface.ROTATION_0
+        val isLandscape = rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270
+        val targetRational = when {
+            isVideoSession || config.captureAspect == CaptureAspect.RATIO_16_9 -> {
+                if (isLandscape) Rational(16, 9) else Rational(9, 16)
+            }
+            config.captureAspect == CaptureAspect.RATIO_4_3 -> {
+                if (isLandscape) Rational(4, 3) else Rational(3, 4)
+            }
+            else -> {
+                val metrics = context.resources.displayMetrics
+                val w = metrics.widthPixels
+                val h = metrics.heightPixels
+                if (isLandscape) Rational(maxOf(w, h), minOf(w, h)) else Rational(minOf(w, h), maxOf(w, h))
+            }
+        }
+        val sessionViewPort = ViewPort.Builder(targetRational, rotation)
+            .setScaleType(if (config.captureAspect == CaptureAspect.FULL && !isVideoSession) ViewPort.FILL_CENTER else ViewPort.FIT)
+            .build()
 
         if (config.concurrent) {
             if (!isDualCameraSupported(context, provider)) {
@@ -255,21 +282,12 @@ class CameraSession(private val context: Context) : CameraRepository {
         }
 
         val previewBuilder = Preview.Builder().setTargetRotation(rotation)
-        previewBuilder.setResolutionSelector(config.captureAspect.toResolutionSelector())
-        Camera2Interop.Extender(previewBuilder).apply {
-            setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-            setCaptureRequestOption(
-                CaptureRequest.EDGE_MODE,
-                CaptureRequest.EDGE_MODE_HIGH_QUALITY
-            )
-            setCaptureRequestOption(
-                CaptureRequest.NOISE_REDUCTION_MODE,
-                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
-            )
+        if (isVideoSession) {
+            previewBuilder.setResolutionSelector(CaptureAspect.RATIO_16_9.toPreviewResolutionSelector())
+        } else {
+            previewBuilder.setResolutionSelector(config.captureAspect.toPreviewResolutionSelector())
         }
+
         val cameraInfo = stillInfo
         val wantStab = config.videoStabilization && !useExtension
         val previewStab = wantStab && isPreviewStabilizationSupported(cameraInfo)
@@ -279,7 +297,6 @@ class CameraSession(private val context: Context) : CameraRepository {
         val liveEffects = config.liveEffects && !useRaw
         val preview = previewBuilder.build().also { it.surfaceProvider = previewView.surfaceProvider }
         this.preview = preview
-
         val captureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setFlashMode(config.flash.toImageCaptureMode())
@@ -301,10 +318,11 @@ class CameraSession(private val context: Context) : CameraRepository {
             captureBuilder.setResolutionSelector(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
                     .build()
             )
         } else {
-            captureBuilder.setResolutionSelector(config.captureAspect.toResolutionSelector())
+            captureBuilder.setResolutionSelector(config.captureAspect.toCaptureResolutionSelector())
         }
         val resolved = resolveStillOutput(
             info = runCatching { provider.getCameraInfo(selector) }.getOrNull()
@@ -320,16 +338,19 @@ class CameraSession(private val context: Context) : CameraRepository {
         val capture = captureBuilder.build()
         imageCapture = capture
 
-        val recorder = Recorder.Builder()
-            .setQualitySelector(config.videoQuality.toQualitySelector())
-            .build()
-        val videoRange = resolveVideoHdrRange(cameraInfo, config)
-        val video = buildVideoCapture(recorder, videoStab, videoRange, config.frontMirror)
+        val includeVideo = (isVideoSession || config.motionPhoto) && !useExtension && !liveEffects
+        val video = if (includeVideo) {
+            val recorder = Recorder.Builder()
+                .setQualitySelector(config.videoQuality.toQualitySelector())
+                .build()
+            val videoRange = resolveVideoHdrRange(cameraInfo, config)
+            buildVideoCapture(recorder, videoStab, videoRange, config.frontMirror)
+        } else {
+            null
+        }
         videoCapture = video
-
-        val includeVideo = !useExtension && !liveEffects
         val analysis = if (liveEffects) {
-            buildColorAnalysis(rotation, config.effect)
+            buildColorAnalysis(rotation, config.effect, config.captureAspect)
         } else {
             stopColorAnalysis()
             null
@@ -345,7 +366,8 @@ class CameraSession(private val context: Context) : CameraRepository {
                 imageCapture = capture,
                 videoCapture = if (includeVideo) video else null,
                 imageAnalysis = analysis,
-                fps60 = wantFps60
+                fps60 = wantFps60,
+                viewPort = sessionViewPort
             )
         } catch (error: Exception) {
             if (!config.cameraId.isNullOrBlank()) {
@@ -358,13 +380,23 @@ class CameraSession(private val context: Context) : CameraRepository {
                     imageCapture = capture,
                     videoCapture = if (includeVideo) video else null,
                     imageAnalysis = analysis,
-                    fps60 = wantFps60
+                    fps60 = wantFps60,
+                    viewPort = sessionViewPort
                 )
             } else {
                 throw error
             }
         }
         if (!includeVideo) videoCapture = null
+
+        Logger.debug(
+            TAG,
+            "Bind result: aspect=${if (isVideoSession) "16:9" else config.captureAspect} isVideo=$isVideoSession " +
+                "scaleType=${previewView.scaleType} " +
+                "previewRes=${preview.resolutionInfo?.resolution} " +
+                "captureRes=${imageCapture?.resolutionInfo?.resolution} " +
+                "videoRes=${videoCapture?.output?.mediaSpec}"
+        )
 
         return finishBind(
             config = config,
@@ -381,7 +413,8 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit
     ): Result<File> = suspendCancellableCoroutine { continuation ->
         val onSaved: (File) -> Unit = { file ->
             if (continuation.isActive) continuation.resume(Result.success(file))
@@ -396,9 +429,9 @@ class CameraSession(private val context: Context) : CameraRepository {
             stillFormat != StillFormat.HEIC_ULTRA_HDR &&
             videoCapture != null
         ) {
-            captureMotionPhoto(outputDirectory, lens, effect, onSaved, onError)
+            captureMotionPhoto(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
         } else {
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
         }
     }
 
@@ -518,11 +551,14 @@ class CameraSession(private val context: Context) : CameraRepository {
         colorAnalyzer?.effect = type
     }
 
-    override fun setTargetRotation(rotation: Int) {
+    override fun setDisplayRotation(rotation: Int) {
         preview?.targetRotation = rotation
+        imageAnalysis?.targetRotation = rotation
+    }
+
+    override fun setTargetRotation(rotation: Int) {
         imageCapture?.targetRotation = rotation
         videoCapture?.targetRotation = rotation
-        imageAnalysis?.targetRotation = rotation
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
@@ -594,7 +630,14 @@ class CameraSession(private val context: Context) : CameraRepository {
     private fun selectorFor(config: CameraBindConfig): CameraSelector {
         val id = config.cameraId
         if (id.isNullOrBlank()) return config.lens.toSelector()
+        val facing = if (config.lens == CameraLens.FRONT) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        Logger.debug(TAG, "selectorFor: selecting cameraId=$id, facing=$facing")
         return CameraSelector.Builder()
+            .requireLensFacing(facing)
             .addCameraFilter { infos ->
                 val match = infos.filter { Camera2CameraInfo.from(it).cameraId == id }
                 if (match.isEmpty()) {
@@ -625,24 +668,41 @@ class CameraSession(private val context: Context) : CameraRepository {
             } else {
                 minFocal * 7f
             }
-            val label = when {
-                equivalent < 20f -> 0.5f
-                equivalent < 40f -> 1f
-                equivalent < 70f -> 2f
-                else -> 5f
-            }
-            PhysicalZoom(cameraId = camera2.cameraId, label = label) to equivalent
+            val zoomRange = camera2.getCameraCharacteristic(
+                CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+            )
+            Triple(camera2.cameraId, equivalent, zoomRange?.lower)
         }
-        return labeled
+        if (labeled.isEmpty()) return emptyList()
+
+        // Primary 1.0x wide lens is typically around 24-28mm equivalent
+        val primary = labeled.minByOrNull { kotlin.math.abs(it.second - 26f) } ?: labeled.first()
+        val primaryEq = primary.second.coerceAtLeast(10f)
+
+        val physicalZooms = labeled.map { (id, eq, hardwareMin) ->
+            val rawRatio = eq / primaryEq
+            val label = when {
+                rawRatio < 0.85f -> {
+                    // Ultrawide: prioritize hardware-reported min zoom (e.g. 0.6x) if consistent, else round focal ratio
+                    val focalRatio = (kotlin.math.round(rawRatio * 10f) / 10f).coerceAtLeast(0.1f)
+                    if (hardwareMin != null && kotlin.math.abs(hardwareMin - focalRatio) < 0.2f) {
+                        (kotlin.math.round(hardwareMin * 10f) / 10f).coerceAtLeast(0.1f)
+                    } else {
+                        focalRatio
+                    }
+                }
+                rawRatio in 0.85f..1.4f -> 1.0f
+                rawRatio in 1.4f..2.5f -> 2.0f
+                rawRatio in 2.5f..4.0f -> 3.0f
+                else -> (kotlin.math.round(rawRatio * 10f) / 10f)
+            }
+            PhysicalZoom(cameraId = id, label = label) to eq
+        }
+
+        return physicalZooms
             .groupBy { it.first.label }
             .map { (_, group) ->
-                val target = when (group.first().first.label) {
-                    0.5f -> 16f
-                    1f -> 28f
-                    2f -> 55f
-                    else -> 100f
-                }
-                group.minBy { kotlin.math.abs(it.second - target) }.first
+                group.minBy { kotlin.math.abs(it.second - (primaryEq * it.first.label)) }.first
             }
             .sortedBy { it.label }
     }
@@ -672,12 +732,13 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
         val capture = imageCapture ?: return onError("Camera is not ready")
         if (stillFormat == StillFormat.RAW_JPEG) {
-            takeRawJpeg(capture, outputDirectory, lens, onSaved, onError)
+            takeRawJpeg(capture, outputDirectory, lens, onCaptureStarted, onSaved, onError)
             return
         }
         val extension = if (stillFormat == StillFormat.HEIC_ULTRA_HDR) {
@@ -697,15 +758,21 @@ class CameraSession(private val context: Context) : CameraRepository {
             options,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
+                override fun onCaptureStarted() {
+                    mainHandler.post { onCaptureStarted() }
+                }
+
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val file = output.savedUri?.toFile() ?: photoFile
                     val preserveHdr = stillFormat != StillFormat.JPEG
-                    val processed = if (preserveHdr) {
-                        file
+                    if (preserveHdr) {
+                        onSaved(file)
                     } else {
-                        applyStillOutput(file, effect)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val processed = applyStillOutput(file, effect)
+                            onSaved(processed)
+                        }
                     }
-                    onSaved(processed)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -720,6 +787,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         capture: ImageCapture,
         outputDirectory: File,
         lens: CameraLens,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -743,6 +811,10 @@ class CameraSession(private val context: Context) : CameraRepository {
             jpegOptions,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
+                override fun onCaptureStarted() {
+                    mainHandler.post { onCaptureStarted() }
+                }
+
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val file = output.savedUri?.toFile()
                     when (output.imageFormat) {
@@ -765,12 +837,13 @@ class CameraSession(private val context: Context) : CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
+        onCaptureStarted: () -> Unit,
         onSaved: (File) -> Unit,
         onError: (String) -> Unit
     ) {
         if (imageCapture == null) {
             // No stills available; skip recording to avoid orphaned video.
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
             return
         }
         motionStill = null
@@ -791,7 +864,7 @@ class CameraSession(private val context: Context) : CameraRepository {
         }
         if (videoFile == null) {
             motionAwaitingVideo = false
-            takeStill(outputDirectory, lens, effect, onSaved, onError)
+            takeStill(outputDirectory, lens, effect, onCaptureStarted, onSaved, onError)
             return
         }
         motionVideo = videoFile
@@ -799,6 +872,7 @@ class CameraSession(private val context: Context) : CameraRepository {
             outputDirectory = outputDirectory,
             lens = lens,
             effect = effect,
+            onCaptureStarted = onCaptureStarted,
             onSaved = { file ->
                 motionStill = file
                 finishMotionIfReady()
@@ -914,18 +988,33 @@ class CameraSession(private val context: Context) : CameraRepository {
         )
     }
 
-    private fun buildColorAnalysis(rotation: Int, initial: EffectMode): ImageAnalysis {
+    private fun buildColorAnalysis(
+        rotation: Int,
+        initial: EffectMode,
+        aspect: CaptureAspect
+    ): ImageAnalysis {
         val analyzer = ColorEffectAnalyzer { bitmap -> _effectFrame.value = bitmap }.also {
             it.effect = initial
             colorAnalyzer = it
+        }
+        val targetSize = if (aspect == CaptureAspect.RATIO_4_3) {
+            Size(1280, 960)
+        } else {
+            Size(1280, 720)
+        }
+        val aspectStrategy = if (aspect == CaptureAspect.RATIO_4_3) {
+            AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+        } else {
+            AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
         }
         return ImageAnalysis.Builder()
             .setTargetRotation(rotation)
             .setResolutionSelector(
                 ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(aspectStrategy)
                     .setResolutionStrategy(
                         ResolutionStrategy(
-                            Size(1280, 720),
+                            targetSize,
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                         )
                     )
@@ -969,13 +1058,17 @@ class CameraSession(private val context: Context) : CameraRepository {
         previewUseCase.surfaceProvider = previewView.surfaceProvider
         val selector = selectorFor(config)
         provider.unbindAll()
+        val rotation = previewUseCase.targetRotation
+        val isLandscape = rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270
+        val videoRational = if (isLandscape) Rational(16, 9) else Rational(9, 16)
+        val videoViewPort = ViewPort.Builder(videoRational, rotation)
+            .setScaleType(ViewPort.FIT)
+            .build()
         camera = try {
             val group = UseCaseGroup.Builder()
                 .addUseCase(previewUseCase)
                 .addUseCase(video)
-                .also { builder ->
-                    previewView.viewPort?.let { builder.setViewPort(it) }
-                }
+                .setViewPort(videoViewPort)
                 .build()
             provider.bindToLifecycle(lifecycleOwner, selector, group)
         } catch (error: Exception) {
@@ -997,7 +1090,8 @@ class CameraSession(private val context: Context) : CameraRepository {
         imageCapture: ImageCapture,
         videoCapture: VideoCapture<Recorder>?,
         imageAnalysis: ImageAnalysis?,
-        fps60: Boolean = false
+        fps60: Boolean = false,
+        viewPort: ViewPort? = null
     ): Camera {
         val attempts = mutableListOf<List<UseCase>>()
         if (imageAnalysis != null) {
@@ -1016,7 +1110,8 @@ class CameraSession(private val context: Context) : CameraRepository {
                     lifecycleOwner = lifecycleOwner,
                     selector = selector,
                     useCases = useCases,
-                    fps60 = fps60 && videoCapture != null && useCases.contains(videoCapture)
+                    fps60 = fps60 && videoCapture != null && useCases.contains(videoCapture),
+                    viewPort = viewPort
                 )
                 this.videoCapture = videoCapture?.takeIf { capture -> useCases.contains(capture) }
                 this.imageCapture = imageCapture.takeIf { capture -> useCases.contains(capture) }
@@ -1041,11 +1136,12 @@ class CameraSession(private val context: Context) : CameraRepository {
         lifecycleOwner: LifecycleOwner,
         selector: CameraSelector,
         useCases: List<UseCase>,
-        fps60: Boolean
+        fps60: Boolean,
+        viewPort: ViewPort? = null
     ): Camera {
         val groupBuilder = UseCaseGroup.Builder().apply {
             useCases.forEach { addUseCase(it) }
-            boundPreviewView?.viewPort?.let { setViewPort(it) }
+            viewPort?.let { setViewPort(it) }
         }
         if (fps60) {
             try {
@@ -1431,25 +1527,52 @@ class CameraSession(private val context: Context) : CameraRepository {
         return File(baseFolder, name + extension)
     }
 
-    private suspend fun awaitProvider(): ProcessCameraProvider = suspendCoroutine { continuation ->
-        val future = ProcessCameraProvider.getInstance(context)
-        future.addListener({
+    private suspend fun awaitProvider(): ProcessCameraProvider {
+        val maxAttempts = 5
+        var delayMs = 350L
+        var lastException: Throwable? = null
+        for (attempt in 1..maxAttempts) {
             try {
-                continuation.resume(future.get())
-            } catch (error: Exception) {
-                continuation.resumeWithException(error)
+                return suspendCancellableCoroutine { continuation ->
+                    val future = ProcessCameraProvider.getInstance(context)
+                    future.addListener({
+                        try {
+                            if (continuation.isActive) continuation.resume(future.get())
+                        } catch (error: Throwable) {
+                            if (continuation.isActive) continuation.resumeWithException(error)
+                        }
+                    }, cameraExecutor)
+                }
+            } catch (error: Throwable) {
+                lastException = error
+                val cause = error.cause ?: error
+                val isRecoverable = error is CameraUnavailableException ||
+                    cause is CameraUnavailableException ||
+                    error is InitializationException ||
+                    cause is InitializationException
+                if (attempt < maxAttempts && isRecoverable) {
+                    Logger.warning(
+                        TAG,
+                        "Camera provider not ready yet (attempt $attempt/$maxAttempts): ${error.message}; retrying in ${delayMs}ms"
+                    )
+                    delay(delayMs)
+                    delayMs = (delayMs * 1.5).toLong()
+                } else {
+                    throw error
+                }
             }
-        }, cameraExecutor)
+        }
+        throw lastException ?: IllegalStateException("Unable to obtain ProcessCameraProvider")
     }
 
     private suspend fun awaitExtensions(provider: ProcessCameraProvider): ExtensionsManager =
-        suspendCoroutine { continuation ->
+        suspendCancellableCoroutine { continuation ->
             val future = ExtensionsManager.getInstanceAsync(context, provider)
             future.addListener({
                 try {
-                    continuation.resume(future.get())
-                } catch (error: Exception) {
-                    continuation.resumeWithException(error)
+                    if (continuation.isActive) continuation.resume(future.get())
+                } catch (error: Throwable) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
                 }
             }, cameraExecutor)
         }

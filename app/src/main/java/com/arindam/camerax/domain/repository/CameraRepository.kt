@@ -42,7 +42,8 @@ interface CameraRepository {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit = {}
     ): Result<File>
 
     /** Starts video recording; returns the output file on success. */
@@ -71,6 +72,9 @@ interface CameraRepository {
 
     /** Updates live / still color-matrix effect without rebinding. */
     fun setEffect(type: EffectMode)
+
+    /** Updates target rotation for preview/display; no rebind. */
+    fun setDisplayRotation(rotation: Int)
 
     /** Updates target rotation for capture; no rebind. */
     fun setTargetRotation(rotation: Int)

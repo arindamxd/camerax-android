@@ -83,6 +83,31 @@ val EffectMode.labelRes: Int
         EffectMode.VIVID -> R.string.effect_vivid
     }
 
+val EffectMode.styleTitleRes: Int
+    @StringRes get() = when (this) {
+        EffectMode.NONE -> R.string.style_standard
+        EffectMode.VIVID -> R.string.style_vibrant
+        EffectMode.WARM -> R.string.style_warm
+        EffectMode.COOL -> R.string.style_cool
+        EffectMode.SEPIA -> R.string.style_dramatic
+        EffectMode.GRAYSCALE -> R.string.style_mono
+        EffectMode.INVERT -> R.string.style_invert
+    }
+
+val CaptureAspect.labelRes: Int
+    @StringRes get() = when (this) {
+        CaptureAspect.RATIO_4_3 -> R.string.pref_aspect_4_3
+        CaptureAspect.RATIO_16_9 -> R.string.pref_aspect_16_9
+        CaptureAspect.FULL -> R.string.pref_aspect_full
+    }
+
+val CaptureAspect.shortLabel: String
+    get() = when (this) {
+        CaptureAspect.RATIO_4_3 -> "4:3"
+        CaptureAspect.RATIO_16_9 -> "16:9"
+        CaptureAspect.FULL -> "FULL"
+    }
+
 /**
  * Presentation state for the live feed. Chrome flags are derived from
  * [com.arindam.camerax.domain.model.CameraModeCatalog]; do not scatter `if (mode == …)` in UI.
@@ -98,6 +123,7 @@ data class CameraUiState(
     val minZoom: Float = 1f,
     val maxZoom: Float = 1f,
     val hasFlash: Boolean = false,
+    val isCameraReady: Boolean = true,
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val isMuted: Boolean = false,
@@ -159,14 +185,16 @@ data class CameraUiState(
     val zoomChips: List<Float>
         get() {
             val chips = mutableListOf<Float>()
-            // 1. Ultrawide: only include if the hardware actually supports < 0.95x (e.g. 0.6x)
-            if (minZoom < 0.95f) {
+            // 1. Extra physical cameras (e.g. 0.5x ultrawide, telephoto)
+            physicalZooms.forEach { chips.add(it.label) }
+            // 2. Ultrawide: only include if hardware supports < 0.95x and no physical ultrawide already added
+            if (minZoom < 0.95f && chips.none { it < 0.95f }) {
                 val roundedMin = (kotlin.math.round(minZoom * 10f) / 10f).coerceAtLeast(0.1f)
                 chips.add(roundedMin)
             }
-            // 2. Base 1.0x optical standard is always available
+            // 3. Base 1.0x optical standard is always available
             chips.add(1.0f)
-            // 3. 2x telephoto/digital step if supported by the hardware maxZoom
+            // 4. 2x telephoto/digital step if supported by the hardware maxZoom
             if (maxZoom >= 1.95f) {
                 chips.add(2.0f)
             }
@@ -174,12 +202,21 @@ data class CameraUiState(
         }
 
     val activeZoomChip: Float
-        get() = zoomChips.minByOrNull { kotlin.math.abs(it - zoomRatio) } ?: zoomRatio
+        get() {
+            val currentPhysical = physicalZooms.firstOrNull { it.cameraId == cameraId }
+            if (currentPhysical != null && currentPhysical.label < 1.0f) {
+                return currentPhysical.label
+            }
+            return zoomChips.minByOrNull { kotlin.math.abs(it - zoomRatio) } ?: zoomRatio
+        }
 
     val visibleModes: List<CameraMode>
         get() = CameraModeCatalog.visibleModes(slowMotionSupported, concurrentSupported)
 
     private val profile get() = CameraModeCatalog.profile(mode)
+
+    val isVideoMode: Boolean
+        get() = profile.captureAction == CaptureAction.VIDEO || mode == CameraMode.VIDEO
 
     val showsFlash: Boolean
         get() = hasFlash && profile.showsFlash
@@ -210,6 +247,13 @@ data class CameraUiState(
 
     val showsEffects: Boolean
         get() = profile.showsEffects
+
+    val allowsEffect: Boolean
+        get() = profile.allowsEffect
+
+    val showsAspectControl: Boolean
+        get() = (mode == CameraMode.PHOTO || mode == CameraMode.EFFECTS) &&
+            !isRecording && !panoramaActive
 
     val showsPip: Boolean
         get() = profile.showsPip

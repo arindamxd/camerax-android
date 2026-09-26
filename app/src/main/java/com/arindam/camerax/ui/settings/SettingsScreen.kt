@@ -74,11 +74,12 @@ fun SettingsScreen(
     features: DeviceCaptureFeatures = DeviceCaptureFeatures(),
     versionLabel: String = "",
     microphonePermissionGranted: Boolean = true,
+    isVideoMode: Boolean = false,
     onRequestMicrophonePermission: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val prefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
-    val sections = remember(features, versionLabel, microphonePermissionGranted) {
+    val sections = remember(features, versionLabel, microphonePermissionGranted, isVideoMode) {
         settingsSections(
             versionLabel = versionLabel.ifEmpty { context.getString(R.string.app_version) },
             videoQualities = features.videoQualities,
@@ -90,7 +91,8 @@ fun SettingsScreen(
             fullSensorRawAvailable = features.fullSensorRaw,
             lowLightBoostAvailable = features.lowLightBoost,
             videoFps60Available = features.videoFps60,
-            microphonePermissionGranted = microphonePermissionGranted
+            microphonePermissionGranted = microphonePermissionGranted,
+            isVideoMode = isVideoMode
         )
     }
     val scheme = MaterialTheme.colorScheme
