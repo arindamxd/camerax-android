@@ -195,7 +195,9 @@ data class CameraBindConfig(
     val retainRecording: Boolean = false,
     val concurrent: Boolean = false,
     val videoFps60: Boolean = false,
-    val frontMirror: Boolean = true
+    val frontMirror: Boolean = true,
+    val isVideoMode: Boolean = false,
+    val motionPhoto: Boolean = false
 )
 
 /** What the session actually bound (HUD chips, zoom range, capabilities). */

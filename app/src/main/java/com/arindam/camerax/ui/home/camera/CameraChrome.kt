@@ -3,10 +3,12 @@ package com.arindam.camerax.ui.home.camera
 import android.media.MediaMetadataRetriever
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -19,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -76,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -98,6 +102,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -924,6 +929,7 @@ fun CameraFooter(
                     isRecording = state.isRecording,
                     panoramaActive = state.panoramaActive,
                     compact = compact,
+                    enabled = state.isCameraReady || state.isRecording || state.panoramaActive,
                     onClick = onShutterClicked
                 )
                 Spacer(Modifier.weight(1f))
@@ -949,9 +955,17 @@ fun ShutterButton(
     isRecording: Boolean,
     panoramaActive: Boolean = false,
     compact: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.88f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "shutterPressScale"
+    )
     val innerScale by animateFloatAsState(
         if (isRecording || panoramaActive) 0.42f else 0.78f,
         label = "shutterScale"
@@ -960,11 +974,21 @@ fun ShutterButton(
         if (isRecording || panoramaActive) 0.22f else 0.5f,
         label = "shutterCorner"
     )
+    val alpha by animateFloatAsState(
+        if (enabled) 1f else 0.45f,
+        label = "shutterAlpha"
+    )
     Box(
         modifier = Modifier
             .size(if (compact) 64.dp else 84.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .alpha(alpha)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                enabled = enabled,
+                interactionSource = interactionSource,
                 indication = ripple(bounded = false)
             ) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)

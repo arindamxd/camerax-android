@@ -26,6 +26,7 @@ import com.arindam.camerax.domain.usecase.ProbeDeviceFeatures
 import com.arindam.camerax.domain.usecase.PublishMedia
 import com.arindam.camerax.domain.usecase.ReleaseCamera
 import com.arindam.camerax.domain.usecase.ResumeRecording
+import com.arindam.camerax.domain.usecase.SetDisplayRotation
 import com.arindam.camerax.domain.usecase.SetEffect
 import com.arindam.camerax.domain.usecase.SetExposure
 import com.arindam.camerax.domain.usecase.SetExposureCompensation
@@ -88,6 +89,7 @@ data class CameraInteractors(
     val setZoom: SetZoom,
     val tapToFocus: TapToFocus,
     val setEffect: SetEffect,
+    val setDisplayRotation: SetDisplayRotation,
     val setTargetRotation: SetTargetRotation,
     val setExposure: SetExposure,
     val setExposureCompensation: SetExposureCompensation,
@@ -126,6 +128,7 @@ fun cameraInteractors(
     setZoom = SetZoom(cameraRepository),
     tapToFocus = TapToFocus(cameraRepository),
     setEffect = SetEffect(cameraRepository),
+    setDisplayRotation = SetDisplayRotation(cameraRepository),
     setTargetRotation = SetTargetRotation(cameraRepository),
     setExposure = SetExposure(cameraRepository),
     setExposureCompensation = SetExposureCompensation(cameraRepository),

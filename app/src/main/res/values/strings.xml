@@ -309,6 +309,7 @@
     <string name="pref_subtitle_raw_full_sensor_unsupported">This device doesn\'t support full-sensor RAW</string>
     <string name="pref_title_capture_aspect">Photo aspect</string>
     <string name="pref_subtitle_capture_aspect">Frame for preview and stills</string>
+    <string name="pref_subtitle_capture_aspect_video">Fixed to 16:9 for video</string>
     <string name="pref_aspect_4_3">4:3</string>
     <string name="pref_aspect_16_9">16:9</string>
     <string name="pref_aspect_full">Full</string>

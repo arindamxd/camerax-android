@@ -88,7 +88,13 @@ class CameraFragment : BaseFragmentCompose() {
                     }
                 },
                 onSettingsClicked = {
-                    startActivity(Intent(requireContext(), SettingsActivity::class.java))
+                    val intent = Intent(requireContext(), SettingsActivity::class.java).apply {
+                        putExtra(
+                            SettingsActivity.EXTRA_IS_VIDEO_MODE,
+                            viewModel.uiState.value.isVideoMode
+                        )
+                    }
+                    startActivity(intent)
                 },
                 onExternalCaptureReady = { file -> deliverExternalCapture(file) }
             )

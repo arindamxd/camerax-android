@@ -4,6 +4,8 @@ import android.app.Application
 import android.os.Build
 import android.os.StrictMode
 import androidx.preference.PreferenceManager
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.arindam.camerax.di.AppContainer
 import com.arindam.camerax.util.debug.StrictModePenalty
 import com.arindam.camerax.util.theme.NightMode
@@ -16,10 +18,16 @@ import kotlinx.coroutines.launch
  * Layers: `ui` → `domain` ← `data`. The composition root is [com.arindam.camerax.di.AppContainer].
  * Apply saved Light/Dark/System from [com.arindam.camerax.util.theme.NightMode] at process start.
  */
-class CameraX : Application() {
+class CameraX : Application(), ImageLoaderFactory {
 
     lateinit var container: AppContainer
         private set
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .addLastModifiedToFileCacheKey(false)
+            .build()
+    }
 
     override fun onCreate() {
         super.onCreate()

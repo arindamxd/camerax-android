@@ -38,8 +38,9 @@ class CapturePhoto(private val repository: CameraRepository) {
         outputDirectory: File,
         lens: CameraLens,
         effect: EffectMode,
-        motionPhoto: Boolean
-    ): Result<File> = repository.capturePhoto(outputDirectory, lens, effect, motionPhoto)
+        motionPhoto: Boolean,
+        onCaptureStarted: () -> Unit = {}
+    ): Result<File> = repository.capturePhoto(outputDirectory, lens, effect, motionPhoto, onCaptureStarted)
 }
 
 /** Start video. [persistent] keeps the clip across a lens flip when Settings allows it. */
@@ -96,7 +97,12 @@ class SetEffect(private val repository: CameraRepository) {
     operator fun invoke(type: EffectMode) = repository.setEffect(type)
 }
 
-/** Large-screen rotation. Does not rebind. */
+/** Large-screen / display rotation for preview. Does not rebind. */
+class SetDisplayRotation(private val repository: CameraRepository) {
+    operator fun invoke(rotation: Int) = repository.setDisplayRotation(rotation)
+}
+
+/** Capture orientation (EXIF / recording) for device tilt. Does not rebind. */
 class SetTargetRotation(private val repository: CameraRepository) {
     operator fun invoke(rotation: Int) = repository.setTargetRotation(rotation)
 }

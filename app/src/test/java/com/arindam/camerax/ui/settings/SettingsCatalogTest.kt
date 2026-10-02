@@ -144,4 +144,22 @@ class SettingsCatalogTest {
             .first { it.titleRes == R.string.pref_title_version }
         assertEquals("2.0.0", version.value)
     }
+
+    @Test
+    fun settingsSections_disablesPhotoAspectWhenInVideoMode() {
+        val sections = settingsSections(versionLabel = "1.7.0", isVideoMode = true)
+        val aspectRow = sections.flatMap { it.items }.filterIsInstance<SettingsRow.Choice>()
+            .first { it.keyRes == R.string.pref_key_capture_aspect }
+        assertFalse(aspectRow.enabled)
+        assertEquals(R.string.pref_subtitle_capture_aspect_video, aspectRow.subtitleRes)
+    }
+
+    @Test
+    fun settingsSections_enablesPhotoAspectWhenNotInVideoMode() {
+        val sections = settingsSections(versionLabel = "1.7.0", isVideoMode = false)
+        val aspectRow = sections.flatMap { it.items }.filterIsInstance<SettingsRow.Choice>()
+            .first { it.keyRes == R.string.pref_key_capture_aspect }
+        assertTrue(aspectRow.enabled)
+        assertEquals(R.string.pref_subtitle_capture_aspect, aspectRow.subtitleRes)
+    }
 }

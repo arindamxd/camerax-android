@@ -130,12 +130,18 @@ private fun CameraInfo.toInstalledCamera(): InstalledCamera? {
     } else {
         minFocal
     }
+    val zoomRange = camera2?.getCameraCharacteristic(
+        CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+    )
+    val hardwareMinZoom = zoomRange?.lower
     val zoomLabel = equivalent?.let { mm ->
         when {
-            mm < 20f -> 0.5f
+            mm < 20f -> {
+                hardwareMinZoom ?: (kotlin.math.round((mm / 26f) * 10f) / 10f).coerceAtLeast(0.1f)
+            }
             mm < 40f -> 1f
             mm < 70f -> 2f
-            else -> 5f
+            else -> (kotlin.math.round((mm / 26f) * 10f) / 10f)
         }
     }
     return InstalledCamera(

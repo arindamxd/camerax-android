@@ -7,6 +7,7 @@ import android.os.strictmode.DiskWriteViolation
 import android.os.strictmode.Violation
 import android.util.Log
 import androidx.annotation.RequiresApi
+import com.arindam.camerax.util.log.Logger
 import java.util.concurrent.Executors
 
 /** API 28+ [StrictMode.ThreadPolicy.Builder.penaltyListener] that filters OEM binder disk noise. */
@@ -18,7 +19,7 @@ internal object StrictModePenalty {
     fun install(threadBuilder: StrictMode.ThreadPolicy.Builder) {
         threadBuilder.penaltyListener(Executors.newSingleThreadExecutor()) { violation ->
             if (!isPlatformBinderDiskNoise(violation)) {
-                Log.d(TAG, Log.getStackTraceString(violation))
+                Logger.debug(TAG, Log.getStackTraceString(violation))
             }
         }
     }

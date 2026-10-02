@@ -23,9 +23,14 @@ import com.arindam.camerax.util.theme.applyEdgeToEdgeBarsForNightMode
  */
 class SettingsActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_IS_VIDEO_MODE = "extra_is_video_mode"
+    }
+
     private val viewModel: SettingsViewModel by viewModels {
         val app = application as CameraX
-        SettingsViewModelFactory(app.container, getString(R.string.app_version))
+        val isVideoMode = intent.getBooleanExtra(EXTRA_IS_VIDEO_MODE, false)
+        SettingsViewModelFactory(app.container, getString(R.string.app_version), isVideoMode)
     }
 
     private val micPermissionLauncher = registerForActivityResult(
@@ -53,6 +58,7 @@ class SettingsActivity : AppCompatActivity() {
                     features = state.features,
                     versionLabel = state.versionLabel,
                     microphonePermissionGranted = state.microphonePermissionGranted,
+                    isVideoMode = state.isVideoMode,
                     onRequestMicrophonePermission = ::requestMicrophonePermission
                 )
             }

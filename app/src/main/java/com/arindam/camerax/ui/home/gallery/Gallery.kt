@@ -74,6 +74,7 @@ import com.arindam.camerax.ui.compose.CameraAlertDialog
 import com.arindam.camerax.ui.compose.CameraGlassButton
 import com.arindam.camerax.ui.compose.ChromeControlSize
 import com.arindam.camerax.ui.compose.DarkLightPreviews
+import com.arindam.camerax.ui.compose.ZoomableImage
 import com.arindam.camerax.ui.home.camera.formatRecordingTime
 import com.arindam.camerax.ui.theme.AppTheme
 import com.arindam.camerax.ui.theme.CameraMono
@@ -392,10 +393,17 @@ private fun GalleryPager(
     onVideoTapped: () -> Unit = {},
     onPlaybackPosition: (positionMs: Int, durationMs: Int) -> Unit = { _, _ -> },
 ) {
+    var isCurrentPageZoomed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pagerState.currentPage) {
+        isCurrentPageZoomed = false
+    }
+
     HorizontalPager(
         state = pagerState,
         pageSize = PageSize.Fill,
         beyondViewportPageCount = 1,
+        userScrollEnabled = !isCurrentPageZoomed,
         modifier = Modifier.fillMaxSize()
     ) { page ->
         items.getOrNull(page)?.let { item ->
@@ -415,10 +423,15 @@ private fun GalleryPager(
                 val playMotion = item.isMotionPhoto && motionPlaying && pagerState.currentPage == page
                 Box(Modifier.fillMaxSize()) {
                     if (!playMotion) {
-                        Image(
-                            painter = rememberAsyncImagePainter(model = item.file),
+                        ZoomableImage(
+                            model = item.file,
                             contentScale = ContentScale.Fit,
                             contentDescription = null,
+                            onZoomChanged = { zoomed ->
+                                if (pagerState.currentPage == page) {
+                                    isCurrentPageZoomed = zoomed
+                                }
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -457,8 +470,8 @@ private fun GalleryMotionOverlay(file: File, onPlaybackError: () -> Unit) {
             onPlaybackError = onPlaybackError
         )
     } else {
-        Image(
-            painter = rememberAsyncImagePainter(model = file),
+        ZoomableImage(
+            model = file,
             contentScale = ContentScale.Fit,
             contentDescription = null,
             modifier = Modifier.fillMaxSize()

@@ -57,6 +57,7 @@ import com.arindam.camerax.data.camera.MotionPhotoMuxer
 import com.arindam.camerax.ui.compose.CameraGlassButton
 import com.arindam.camerax.ui.compose.ChromeControlSize
 import com.arindam.camerax.ui.compose.ChromeActionPill
+import com.arindam.camerax.ui.compose.ZoomableImage
 import com.arindam.camerax.ui.theme.CameraMono
 import com.arindam.camerax.ui.theme.themedOverlayChrome
 import java.io.File
@@ -81,8 +82,8 @@ fun CaptureConfirmOverlay(
         when {
             review.isVideo -> ReviewVideo(file = review.file)
             review.isMotionPhoto -> ReviewMotionStill(file = review.file)
-            else -> Image(
-                painter = rememberAsyncImagePainter(model = review.file),
+            else -> ZoomableImage(
+                model = review.file,
                 contentDescription = stringResource(R.string.capture_review_photo),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
@@ -236,8 +237,8 @@ private fun ReviewMotionStill(file: File) {
         if (playing && extracted != null) {
             ReviewVideo(file = extracted!!)
         } else {
-            Image(
-                painter = rememberAsyncImagePainter(model = file),
+            ZoomableImage(
+                model = file,
                 contentDescription = stringResource(R.string.capture_review_photo),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()

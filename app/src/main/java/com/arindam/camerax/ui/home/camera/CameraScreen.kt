@@ -13,6 +13,7 @@ import android.view.Surface
 import android.widget.Toast
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,10 +27,15 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clipToBounds
+import com.arindam.camerax.util.log.Logger
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -50,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +65,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.arindam.camerax.R
 import com.arindam.camerax.domain.model.CameraLens
+import com.arindam.camerax.domain.model.CameraMode
+import com.arindam.camerax.domain.model.CaptureAction
+import com.arindam.camerax.domain.model.CaptureAspect
+import com.arindam.camerax.domain.model.profile
 import kotlin.math.abs
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -92,7 +103,7 @@ fun CameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            scaleType = PreviewView.ScaleType.FIT_CENTER
             isClickable = false
             isFocusable = false
         }
@@ -125,12 +136,12 @@ fun CameraScreen(
                 lifecycleOwner,
                 previewView
             )
-            previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+            previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
         }
     }
     LaunchedEffect(configuration.orientation, configuration.screenWidthDp) {
         if (!inspection) {
-            previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+            previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
         }
     }
     LaunchedEffect(state.message, state.messageRes) {
@@ -151,7 +162,7 @@ fun CameraScreen(
             override fun onDisplayRemoved(displayId: Int) = Unit
             override fun onDisplayChanged(displayId: Int) {
                 if (previewView.display?.displayId == displayId) {
-                    previewView.display?.rotation?.let(viewModel::updateTargetRotation)
+                    previewView.display?.rotation?.let(viewModel::updateDisplayRotation)
                 }
             }
         }
@@ -209,6 +220,44 @@ fun CameraScreen(
         var headerHeightPx by remember { mutableIntStateOf(0) }
         var footerHeightPx by remember { mutableIntStateOf(0) }
         val headerHeightForFocus by rememberUpdatedState(headerHeightPx)
+        val isVideoSession = state.mode.profile().captureAction == CaptureAction.VIDEO ||
+            state.mode.profile().bindSlowMotion ||
+            state.mode.profile().bindConcurrent
+        val is43 = !isVideoSession && state.captureAspect == CaptureAspect.RATIO_4_3
+        val is169 = isVideoSession || state.captureAspect == CaptureAspect.RATIO_16_9
+
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val activeAspect = when {
+            is43 -> if (isLandscape) 4f / 3f else 3f / 4f
+            is169 -> if (isLandscape) 16f / 9f else 9f / 16f
+            else -> null
+        }
+
+        var previewTopPx by remember { mutableIntStateOf(0) }
+        var previewLeftPx by remember { mutableIntStateOf(0) }
+        var previewWidthPx by remember { mutableIntStateOf(0) }
+        var previewHeightPx by remember { mutableIntStateOf(0) }
+
+        val verticalShift = if (is43 && !isLandscape && headerHeightPx > 0 && footerHeightPx > 0) {
+            with(density) { ((headerHeightPx - footerHeightPx) / 2).toDp() }
+        } else {
+            0.dp
+        }
+
+        val viewfinderModifier = if (activeAspect != null) {
+            if (isLandscape) {
+                Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(activeAspect, matchHeightConstraintsFirst = true)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(activeAspect)
+            }
+        } else {
+            Modifier.fillMaxSize()
+        }
+
         Box(
             Modifier
                 .fillMaxSize()
@@ -220,34 +269,65 @@ fun CameraScreen(
                     }
                 )
         ) {
-            if (keepPreview) {
-                if (state.showsEffects) {
-                    AndroidView(
-                        factory = { previewView },
-                        modifier = Modifier.size(1.dp)
-                    )
-                    val effectFrame = state.effectFrame
-                    if (effectFrame != null) {
-                        Image(
-                            bitmap = effectFrame,
-                            contentDescription = stringResource(R.string.effect_frame_description),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = if (state.lens == CameraLens.FRONT && state.frontMirror) {
-                                        -1f
-                                    } else {
-                                        1f
-                                    }
-                                },
-                            contentScale = ContentScale.Crop
-                        )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset(y = verticalShift),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = viewfinderModifier
+                        .animateContentSize(animationSpec = tween(280))
+                        .clipToBounds()
+                        .onGloballyPositioned {
+                            val pos = it.positionInRoot()
+                            previewLeftPx = pos.x.toInt()
+                            previewTopPx = pos.y.toInt()
+                            previewWidthPx = it.size.width
+                            previewHeightPx = it.size.height
+                            Logger.debug(
+                                "CameraScreen",
+                                "Viewfinder: is43=$is43 is169=$is169 aspect=$activeAspect " +
+                                    "size=${it.size.width}x${it.size.height} top=$previewTopPx left=$previewLeftPx"
+                            )
+                        }
+                ) {
+                    if (keepPreview) {
+                        if (state.showsEffects) {
+                            AndroidView(
+                                factory = { previewView },
+                                modifier = Modifier.size(1.dp)
+                            )
+                            val effectFrame = state.effectFrame
+                            if (effectFrame != null) {
+                                Image(
+                                    bitmap = effectFrame,
+                                    contentDescription = stringResource(R.string.effect_frame_description),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleX = if (state.lens == CameraLens.FRONT && state.frontMirror) {
+                                                -1f
+                                            } else {
+                                                1f
+                                            }
+                                        },
+                                    contentScale = if (is43 || is169) ContentScale.Fit else ContentScale.Crop
+                                )
+                            }
+                        } else {
+                            AndroidView(
+                                factory = { previewView },
+                                modifier = Modifier.fillMaxSize(),
+                                update = { view ->
+                                    view.requestLayout()
+                                }
+                            )
+                        }
                     }
-                } else {
-                    AndroidView(
-                        factory = { previewView },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (state.gridEnabled) {
+                        RuleOfThirdsGrid()
+                    }
                 }
             }
             Box(
@@ -309,21 +389,25 @@ fun CameraScreen(
                                         }
                                     }
                                     if (!dragged) {
-                                        // Map tap into full PreviewView coords (gesture layer is inset).
-                                        val focus = Offset(
-                                            start.x,
-                                            start.y + headerHeightForFocus.toFloat()
+                                        val screenX = start.x
+                                        val screenY = start.y + headerHeightForFocus.toFloat()
+                                        val localX = screenX - previewLeftPx
+                                        val localY = screenY - previewTopPx
+                                        val targetWidth = if (previewWidthPx > 0) previewWidthPx else previewView.width
+                                        val targetHeight = if (previewHeightPx > 0) previewHeightPx else previewView.height
+                                        val clampedX = localX.coerceIn(0f, targetWidth.toFloat())
+                                        val clampedY = localY.coerceIn(0f, targetHeight.toFloat())
+                                        viewModel.tapToFocus(
+                                            previewView = previewView,
+                                            localOffset = Offset(clampedX, clampedY),
+                                            screenOffset = Offset(screenX, screenY)
                                         )
-                                        viewModel.tapToFocus(previewView, focus)
                                     }
                                 }
                             }
                         }
                     )
             )
-            if (state.gridEnabled) {
-                RuleOfThirdsGrid()
-            }
             FocusRing(state.focusPoint)
             AnimatedVisibility(
                 visible = state.showsTools,
@@ -429,7 +513,8 @@ private fun CameraChromePreview() {
         mode = com.arindam.camerax.domain.model.CameraMode.PHOTO,
         zoomRatio = 1f,
         minZoom = 0.5f,
-        maxZoom = 5f
+        maxZoom = 5f,
+        isCameraReady = true
     )
     AppTheme {
         Box(Modifier.fillMaxSize()) {

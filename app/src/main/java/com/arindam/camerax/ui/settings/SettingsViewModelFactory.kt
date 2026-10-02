@@ -10,7 +10,8 @@ import com.arindam.camerax.di.AppContainer
  */
 class SettingsViewModelFactory(
     private val container: AppContainer,
-    private val versionLabel: String
+    private val versionLabel: String,
+    private val isVideoMode: Boolean = false
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -18,6 +19,7 @@ class SettingsViewModelFactory(
             return SettingsViewModel(
                 container.cameraInteractors,
                 versionLabel,
+                isVideoMode,
                 container.dispatchers
             ) as T
         }
