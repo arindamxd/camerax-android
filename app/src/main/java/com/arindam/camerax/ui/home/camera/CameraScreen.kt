@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import com.arindam.camerax.util.log.Logger
 import androidx.activity.compose.BackHandler
@@ -41,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,12 +114,20 @@ fun CameraScreen(
 
     var keepPreview by remember { mutableStateOf(true) }
     var showActiveCaptureExitDialog by rememberSaveable { mutableStateOf(false) }
+    var drawerOpen by rememberSaveable { mutableStateOf(false) }
+    var stylesTrayOpen by rememberSaveable { mutableStateOf(false) }
+    var aspectTrayOpen by rememberSaveable { mutableStateOf(false) }
     val activeCaptureInProgress = state.isRecording || state.panoramaActive
     BackHandler(enabled = activeCaptureInProgress) {
         showActiveCaptureExitDialog = true
     }
-    LaunchedEffect(activeCaptureInProgress) {
+    LaunchedEffect(activeCaptureInProgress, state.mode) {
         if (!activeCaptureInProgress) showActiveCaptureExitDialog = false
+        if (activeCaptureInProgress || state.showsTools) {
+            drawerOpen = false
+            stylesTrayOpen = false
+            aspectTrayOpen = false
+        }
     }
     LaunchedEffect(
         state.bindRevision,
@@ -213,6 +224,33 @@ fun CameraScreen(
         onDispose { manager.unregisterListener(listener) }
     }
 
+    var deviceRollAngle by remember { mutableFloatStateOf(0f) }
+    var isDeviceFlat by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val manager = context.getSystemService(SensorManager::class.java)
+        val sensor = manager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (sensor == null) return@DisposableEffect onDispose { }
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val gx = event.values[0]
+                val gy = event.values[1]
+                val gxy = kotlin.math.sqrt(gx * gx + gy * gy)
+                if (gxy < 2.5f) {
+                    isDeviceFlat = true
+                    return
+                }
+                isDeviceFlat = false
+                val angle = Math.toDegrees(kotlin.math.atan2(gx.toDouble(), gy.toDouble())).toFloat()
+                val nearest = kotlin.math.round(angle / 90f) * 90f
+                deviceRollAngle = angle - nearest
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { manager.unregisterListener(listener) }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxHeight < 480.dp ||
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -275,9 +313,11 @@ fun CameraScreen(
                     .offset(y = verticalShift),
                 contentAlignment = Alignment.Center
             ) {
+                val cornerRadius = if (activeAspect != null) 16.dp else 0.dp
                 Box(
                     modifier = viewfinderModifier
                         .animateContentSize(animationSpec = tween(280))
+                        .clip(RoundedCornerShape(cornerRadius))
                         .clipToBounds()
                         .onGloballyPositioned {
                             val pos = it.positionInRoot()
@@ -345,7 +385,7 @@ fun CameraScreen(
                                     top = with(density) { headerHeightPx.toDp() },
                                     bottom = with(density) { footerHeightPx.toDp() }
                                 )
-                                .pointerInput(previewView, state.showsZoomChips) {
+                                .pointerInput(previewView, state.showsZoomChips, state.focusPoint) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = true)
                                     val start = down.position
@@ -353,7 +393,15 @@ fun CameraScreen(
                                     var dragged = false
                                     var pinch = false
                                     var cumulativeZoom = 1f
-                                    if (state.showsZoomChips) {
+
+                                    val screenStart = Offset(start.x, start.y + headerHeightForFocus.toFloat())
+                                    val currentFocus = state.focusPoint
+                                    val isNearFocus = currentFocus != null &&
+                                        (screenStart - currentFocus).getDistance() <= 80.dp.toPx()
+                                    val startEv = state.exposureCompensation
+                                    val evLimits = state.exposureLimits
+
+                                    if (state.showsZoomChips && !isNearFocus) {
                                         viewModel.beginZoomGesture()
                                     }
                                     while (true) {
@@ -368,24 +416,35 @@ fun CameraScreen(
                                             pressed.forEach { change ->
                                                 if (change.positionChanged()) change.consume()
                                             }
-                                        } else if (state.showsZoomChips && !pinch) {
+                                        } else if (isNearFocus && !pinch) {
+                                            val pointer = pressed.first()
+                                            val dy = pointer.position.y - start.y
+                                            if (abs(dy) > slop * 0.4f) {
+                                                dragged = true
+                                                val evStepPx = 18.dp.toPx()
+                                                val deltaEv = (-dy / evStepPx).toInt()
+                                                val newEv = (startEv + deltaEv).coerceIn(evLimits.evMin, evLimits.evMax)
+                                                viewModel.setExposureCompensation(newEv)
+                                                viewModel.keepFocusPointActive()
+                                                if (pointer.positionChanged()) pointer.consume()
+                                            }
+                                        } else if (!pinch) {
                                             val pointer = pressed.first()
                                             val dx = pointer.position.x - start.x
                                             val dy = pointer.position.y - start.y
                                             if (abs(dx) > slop || abs(dy) > slop) {
-                                                if (abs(dy) >= abs(dx)) {
-                                                    dragged = true
+                                                dragged = true
+                                                if (dy < -slop * 2.0f) {
+                                                    drawerOpen = true
+                                                    if (pointer.positionChanged()) pointer.consume()
+                                                } else if (dy > slop * 2.0f) {
+                                                    drawerOpen = false
+                                                    if (pointer.positionChanged()) pointer.consume()
+                                                } else if (state.showsZoomChips && abs(dy) >= abs(dx)) {
                                                     viewModel.zoomByDrag(dy, size.height.toFloat())
                                                     if (pointer.positionChanged()) pointer.consume()
-                                                } else {
-                                                    break
                                                 }
                                             }
-                                        } else {
-                                            val pointer = pressed.first()
-                                            val dx = pointer.position.x - start.x
-                                            val dy = pointer.position.y - start.y
-                                            if (abs(dx) > slop || abs(dy) > slop) dragged = true
                                         }
                                     }
                                     if (!dragged) {
@@ -408,7 +467,22 @@ fun CameraScreen(
                         }
                     )
             )
-            FocusRing(state.focusPoint)
+            FocusRing(
+                point = state.focusPoint,
+                exposureIndex = state.exposureCompensation,
+                evMin = state.exposureLimits.evMin,
+                evMax = state.exposureLimits.evMax
+            )
+            // iOS 17/18 Horizon Level Indicator
+            if (!state.isRecording && !state.showsTools && !state.panoramaActive) {
+                HorizonLevelIndicator(
+                    rollAngle = deviceRollAngle,
+                    isFlat = isDeviceFlat,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .zIndex(0.9f)
+                )
+            }
             AnimatedVisibility(
                 visible = state.showsTools,
                 modifier = Modifier.zIndex(0.7f),
@@ -428,6 +502,22 @@ fun CameraScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+            var flashTriggered by remember { mutableStateOf(false) }
+            LaunchedEffect(state.captureFlashToken) {
+                if (state.captureFlashToken > 0) {
+                    flashTriggered = true
+                    delay(80)
+                    flashTriggered = false
+                }
+            }
+            if (flashTriggered) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.75f))
+                        .zIndex(2.5f)
+                )
+            }
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -437,6 +527,16 @@ fun CameraScreen(
                 CameraHeader(
                     state = state,
                     compact = compact,
+                    drawerOpen = drawerOpen,
+                    onToggleDrawer = { drawerOpen = !drawerOpen },
+                    stylesOpen = stylesTrayOpen,
+                    onStylesToggle = {
+                        stylesTrayOpen = !stylesTrayOpen
+                        if (stylesTrayOpen) aspectTrayOpen = false
+                    },
+                    onNightClicked = viewModel::toggleNightMode,
+                    onCycleVideoQuality = viewModel::cycleVideoQuality,
+                    onToggleVideoFps = viewModel::toggleVideoFps60,
                     onFlashClicked = viewModel::cycleFlash,
                     onTimerClicked = viewModel::cycleTimer,
                     onGridClicked = viewModel::toggleGrid,
@@ -472,12 +572,36 @@ fun CameraScreen(
                 CameraFooter(
                     state = state,
                     compact = compact,
+                    drawerOpen = drawerOpen,
+                    stylesOpen = stylesTrayOpen,
+                    onStylesToggle = {
+                        stylesTrayOpen = !stylesTrayOpen
+                        if (stylesTrayOpen) aspectTrayOpen = false
+                    },
+                    aspectOpen = aspectTrayOpen,
+                    onAspectToggle = {
+                        aspectTrayOpen = !aspectTrayOpen
+                        if (aspectTrayOpen) stylesTrayOpen = false
+                    },
+                    onAspectSelected = viewModel::setCaptureAspect,
+                    onNightClicked = viewModel::toggleNightMode,
                     onModeSelected = viewModel::setMode,
                     onFlipClicked = viewModel::toggleLens,
                     onShutterClicked = { viewModel.onShutter(previewView) },
                     onGalleryClicked = onGalleryClicked,
                     onEffectSelected = viewModel::setEffect,
-                    onZoomSelected = viewModel::setZoom
+                    onZoomSelected = viewModel::setZoom,
+                    onZoomContinuous = viewModel::setZoomContinuous,
+                    onQuickTakeStart = viewModel::startQuickTake,
+                    onQuickTakeStop = viewModel::stopQuickTake,
+                    onFlashClicked = viewModel::cycleFlash,
+                    onTimerClicked = viewModel::cycleTimer,
+                    onGridClicked = viewModel::toggleGrid,
+                    onMotionClicked = viewModel::toggleMotionPhoto,
+                    onExposurePrioritySelected = viewModel::setExposurePriority,
+                    onIsoChanged = viewModel::setIso,
+                    onShutterChanged = viewModel::setShutterNanos,
+                    onCompensationChanged = viewModel::setExposureCompensation
                 )
             }
             CountdownOverlay(state.countdownRemaining)

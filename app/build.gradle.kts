@@ -53,7 +53,7 @@ android {
         versionName = rootProject.extra["versionNameBase"] as String
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk.abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") )
+        ndk.abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a") )
     }
 
     buildTypes {
